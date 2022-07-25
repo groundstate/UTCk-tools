@@ -129,6 +129,7 @@ def FudgeData(mjds,utcr):
 appName = os.path.basename(sys.argv[0])
 debug = False
 scheduleSteer = True
+forceSteer = False
 minFitPts = 5 # minimum acceptable number of points for a frequency offset estimate
 maxClockFOffset = 10.0 # ns/day
 maxPhaseSlew = 10.0 # ns/day
@@ -159,6 +160,7 @@ parser = argparse.ArgumentParser(description='Report on UTCr(k) from Rapid UTC d
 
 parser.add_argument('--config','-c',help='use this configuration file',default=configFile)
 parser.add_argument('--debug','-d',help='debug (to stderr)',action='store_true')
+parser.add_argument('--force','-f',help='force steering',action='store_true')
 parser.add_argument('--show','-s',help='show plots',action='store_true')
 parser.add_argument('--version','-v',action='version',version = appName + ' ' + VERSION + '\n' + 'Written by ' + AUTHORS)
 
@@ -166,6 +168,7 @@ args = parser.parse_args()
 
 debug = args.debug
 configFile = args.config
+forceSteer = args.force
 
 cfg = Initialise(configFile)
 
@@ -278,9 +281,12 @@ steerMsgs = ''
 # This is temporary code for testing
 FudgeData(mjd,utck)
 
-if enableSteer:
-	Log(logFile,'Steering is ON')
-
+if enableSteer or forceSteer:
+	if enableSteer:
+		Log(logFile,'Steering is ON')
+	if forceSteer:
+		Log(logFile,'Steering is FORCED')
+		
 	# Calculate the steering parameters
 	
 	
@@ -367,7 +373,7 @@ if enableSteer:
 
 	if abs(freqStep) > maxClockFOffset:
 		scheduleSteer = False
-		msg = 'Mean frequency offset is too large (> {:g} ns/day)'.format(maxClockFOffset)
+		msg = 'Mean frequency offset exceeds limit (> {:g} ns/day)'.format(maxClockFOffset)
 		steerMsgs += msg + '<br>'
 		Log(logFile,msg)
 
@@ -379,7 +385,7 @@ if enableSteer:
 
 	if abs(phaseSlew) > maxPhaseSlew:
 		scheduleSteer = False
-		msg = 'Required phase slew is too large (> {:g} ns/day)'.format(maxPhaseSlew)
+		msg = 'Required phase slew exceeds limit (> {:g} ns/day)'.format(maxPhaseSlew)
 		steerMsgs += msg + '<br>'
 		Log(logFile,msg)
 	
@@ -389,7 +395,7 @@ if enableSteer:
 else:
 	Log(logFile,'Steering is OFF')
 
-if enableSteer and scheduleSteer:
+if (enableSteer and scheduleSteer) or forceSteer:
 	steerFile = os.path.join(scheduledDir,dt.strftime('steer_%Y%m%d.dat'))
 	try:
 		ffe = appliedOffset*1.0E-9/86400.0
@@ -474,7 +480,7 @@ html += '<br>'
 html += 'Current MJD is ' + str(mjdToday) + '<br>'
 html += '<br>'
 
-if not(enableSteer):
+if not(enableSteer) and not(forceSteer):
 	html += 'Automatic steering is currently disabled<br>'
 	html += 'No steering parameters have been calculated<br>'
 	html += '(re-enable by touching ~/control/' + enableSteerFile + ')<br>'
@@ -487,7 +493,10 @@ else:
 	
 	html += 'Total (weighted) applied frequency offset = {:g} ns/day<br>'.format(appliedOffset)
 	if not(scheduleSteer):
-		html += '<div> <strong> NO STEER WILL BE APPLIED </strong> </div>'
+		if forceSteer:
+			html += '<div> <strong> STEERING WILL BE FORCED </strong> </div>'
+		else:
+			html += '<div> <strong> NO STEER WILL BE APPLIED </strong> </div>'
 		html += steerMsgs 
 
 html += '<H3>Time offset: UTCr - ' + UTCstr + '</H3>' 
