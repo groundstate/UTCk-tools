@@ -96,7 +96,7 @@ def Initialise(configFile):
 	# Check for required arguments
 	reqd = []
 	for k in reqd:
-		if (not cfg.has_key(k)):
+		if (not k in cfg):
 			ErrorExit("The required configuration entry " + k + " is undefined")
 		
 	return cfg
