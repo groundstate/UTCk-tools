@@ -60,7 +60,7 @@ def Log(logFile,msg):
 	Debug(msg)
 	try:
 		flog = open(logFile,'a')
-		flog.write('{} {}\n'.format(time.strftime('%Y-%m-%d %H:%M:%S',time.gmtime()),msg))
+		flog.write('{} {}:{}\n'.format(time.strftime('%Y-%m-%d %H:%M:%S',time.gmtime()),appName,msg))
 		flog.close()
 		flog.close()
 	except:
@@ -91,6 +91,7 @@ def Initialise(configFile):
 			ErrorExit("The required configuration entry " + k + " is undefined")
 		
 	return cfg
+
 
 #-----------------------------------------------------------------------------
 def Cleanup():
@@ -128,14 +129,15 @@ def GetHROGSettings(serport):
 	ffof = None
 	phase = None
 	ret = GetHROGResponse(serport,'STOFFS?') # time offset STOFFS?
+	# Don't convert return strings so we always report them as the HROG reports them
 	if ret:
-		stoffs = float(ret[1]) # WARNING assuming units are always ns
+		stoffs = ret[1] # WARNING assuming units are always ns
 	ret = GetHROGResponse(serport,'FFOF?') # current fractional frequency offset FFOF?
 	if ret:
-		ffof = float(ret[1])
+		ffof = ret[1]
 	ret = GetHROGResponse(serport,'PHAS?')# phase offset PHAS?
 	if ret:
-		 phas = float(ret[1])
+		 phas = ret[1]
 	return [stoffs,ffof,phas]
 
 # ------------------------------------------
@@ -147,7 +149,7 @@ debug = False
 home =os.environ['HOME'] + '/'
 user =os.environ['USER'] # remember to define this in the user's crontab
 configFile = os.path.join(home,'etc/utcsteer.conf')
-repDir  = os.path.join(home,'utcsteer/reports')
+ussConfigFile = os.path.join(home,'etc/utcsteersched.conf')
 logDir = os.path.join(home,'utcsteer/logs')
 controlDir = os.path.join(home,'utcsteer/control')
 scheduledDir = os.path.join(controlDir,'scheduled_steer')
@@ -176,6 +178,13 @@ if (not os.path.isdir(logPath)):
 
 cfg=Initialise(configFile)
 
+# Get some settings from utcsteersched.conf
+ussCfg = ottplib.LoadConfig(ussConfigFile,{'tolower':True})
+if (ussCfg == None):
+	ErrorExit("Error loading " + ussConfigFile)
+	
+logFile = os.path.join(logDir,'utcsteer.log') # this log will be common to several scripts
+	
 portSpeed = 9600
 if ('hrog10:baud rate' in cfg):
 	newSpeed = cfg['hrog10:baud rate']
@@ -220,8 +229,38 @@ serport.flush()
 
 if args.show:
 	[stoffs,ffof,phas] = GetHROGSettings(serport)
-	print('Time offset = {:f} ns'.format(stoffs))
-	print('Fractional frequency offset = {:f}'.format(ffof))
-	print('Phase offset = {:f} deg'.format(phas))
+	print('Time offset = {} ns'.format(stoffs))
+	print('Fractional frequency offset = {}'.format(ffof))
+	print('Phase offset = {} deg'.format(phas))
 	Cleanup()
 	sys.exit(0)
+
+# Check for a scheduled steer
+steers = glob.glob(os.path.join(scheduledDir,'steer*.dat'))
+
+ffs = None
+
+if (len(steers)==0):
+	Log(logFile,'no steers are scheduled')
+elif (len(steers)==1):
+	Debug('Found ' + steers[0])
+	fin = open(steers[0],'r')
+	
+	for l in fin:
+		if re.match(r'^\s*#',l):
+			continue
+		ffs = float(l)
+		break
+	fin.close()
+else:
+	Log(logFile,'too many unprocessed steers')
+
+if ffs:
+	Debug('Steering')
+	# Get old settings
+	# [stoffs,ffof,phas] = GetHROGSettings(serport)
+	# Get new settings
+	# [stoffs,ffof,phas] = GetHROGSettings(serport)
+	# Move the file
+	
+Cleanup()
