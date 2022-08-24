@@ -55,7 +55,7 @@ sys.path.append("/usr/local/lib/python3.8/site-packages") # Ubuntu 20.04
 
 import ottplib
 
-VERSION = "0.0.1"
+VERSION = "0.0.2"
 AUTHORS = "Michael Wouters"
 
 # ------------------------------------------
@@ -135,8 +135,8 @@ maxClockFOffset = 10.0 # ns/day
 maxPhaseSlew = 10.0 # ns/day
 maxLatency = 5 # 
 utcrRefMJD = 56473 # Last MJD for UTCr_1326
-freqGain = 1.0 # gain/weight for component of frequency adjustment due to mean frequency offset 
-phaseGain = 1.0 # gain/weight for component of frequency adjustment due to current phase offset
+freqGain = 0.5 # gain/weight for component of frequency adjustment due to mean frequency offset 
+phaseGain = 0.5 # gain/weight for component of frequency adjustment due to current phase offset
 
 UTCID = 'AUS'
 enableSteerFile = 'ENABLE_STEERING' 
@@ -151,8 +151,8 @@ scheduledDir = os.path.join(controlDir,'scheduled_steer')
 processedDir = os.path.join(controlDir,'processed_steers')
 historyLength = 90 # in days
 tmpDir = os.path.join(home,'utcsteer/tmp')
-recipients = 'time@measurement.gov.au'
-email = False
+recipients = 'Michael.Wouters@measurement.gov.au'
+email = True
 bipmurl = 'https://webtai.bipm.org/api/v0.2-beta'
 
 parser = argparse.ArgumentParser(description='Report on UTCr(k) from Rapid UTC data',
@@ -183,7 +183,7 @@ if ('main:email recipients' in cfg):
 	
 if ('main:reports' in cfg):
 	repDir = os.path.join(home,cfg['main:reports']) 
-
+	
 logFile = os.path.join(logDir,'utcsteer.log') # this log will be common to several scripts
 Log(logFile,'running')
 
@@ -205,7 +205,7 @@ Debug('Last MJD in UTCr should be ' + str(lastMJD))
 mjd1 = lastMJD - historyLength
 mjd2 = lastMJD
 
-GETDATA = False
+GETDATA = True
 
 # Get the data
 
@@ -353,7 +353,7 @@ if enableSteer or forceSteer:
 				masked = True
 				nMasked += 1
 				Debug('Masking {:d}'.format(mjd[im]))
-		if not(masked):
+		if not(masked): # so that we only add once per MJD
 			mjdFit.append(mjd[im])
 			utckFit.append(utck[im])
 	Debug('Masked {:d} point(s)'.format(nMasked))
@@ -409,13 +409,32 @@ if (enableSteer and scheduleSteer) or forceSteer:
 		steerMsgs += '<strong>Unable to create the steer file ' + steerFile + '</strong>'
 		# FIXME what to do next
 
+# For the moment, we'll ignore the effect of gaps
+statsMJD = [] # don't actually need this ATM
+statsUTCK = []
+mjdutck = zip(mjd,utck)
+
+for m,u in mjdutck:
+	masked = False
+	for r in mask:
+		if (m >= r[0] and m <= r[1]):
+			masked = True
+			break
+	if not(masked):
+		statsMJD.append(m)
+		statsUTCK.append(u)
+
+nData = len(statsMJD)
+nTOTDEV = int(2.0*nData/3.0)
+nTDEV   = int(nData/3)
+
 # TOTDEV/...
-t = np.arange(1,60,1)
-(taus, devs, errors, ns) = allantools.totdev(utck,rate = 1.0,taus=t)
+t = np.arange(1,nTOTDEV,1)
+(taus, devs, errors, ns) = allantools.totdev(statsUTCK,rate = 1.0,taus=t)
 
 # TDEV/...
-t = np.arange(1,20,1)
-(tdtaus, tddevs, errors, ns) = allantools.tdev(utck,rate = 1.0,taus=t)
+t = np.arange(1,nTDEV,1)
+(tdtaus, tddevs, errors, ns) = allantools.tdev(statsUTCK,rate = 1.0,taus=t)
 
 # Now make the report
 

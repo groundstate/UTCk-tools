@@ -92,7 +92,6 @@ def Initialise(configFile):
 		
 	return cfg
 
-
 #-----------------------------------------------------------------------------
 def Cleanup():
 	# Hmm ugly globals
@@ -102,7 +101,7 @@ def Cleanup():
 		subprocess.check_output(['/usr/local/bin/lockport','-r',port])
 
 #-----------------------------------------------------------------------------
-def SendHROGCmd(serport,cmd):
+def HROGCmd(serport,cmd):
 	Debug('Sending ' + cmd)
 	ba = bytearray() # stupid unicode
 	cmd = cmd + '\r'
@@ -110,14 +109,11 @@ def SendHROGCmd(serport,cmd):
 	serport.write(ba)
 	
 #-----------------------------------------------------------------------------
-def GetHROGResponse(serport,cmd):
+def HROGQuery(serport,cmd):
 	
-	for i in range(0,5):
-		SendHROGCmd(serport,cmd)
-		d = serport.readline().decode('utf-8') # assuming  here that ECHO is on 
-		if not(re.search(cmd,d)):
-			continue
-		d = serport.readline().decode('utf-8').strip()
+	for i in range(0,5): # have a few goes
+		HROGCmd(serport,cmd)
+		d = serport.readline().decode('utf-8').strip()  # assuming  here that ECHO is off
 		if re.search(cmd,d):
 			Debug('Received ' + d)
 			return d.split() # return a list of strings since usual response is CMD VALUE UNIT 
@@ -128,14 +124,14 @@ def GetHROGSettings(serport):
 	stoffs = None
 	ffof = None
 	phase = None
-	ret = GetHROGResponse(serport,'STOFFS?') # time offset STOFFS?
+	ret = HROGQuery(serport,'TOFFS?') # time offset TOFFS?
 	# Don't convert return strings so we always report them as the HROG reports them
 	if ret:
 		stoffs = ret[1] # WARNING assuming units are always ns
-	ret = GetHROGResponse(serport,'FFOF?') # current fractional frequency offset FFOF?
+	ret = HROGQuery(serport,'FFOF?') # current fractional frequency offset FFOF?
 	if ret:
 		ffof = ret[1]
-	ret = GetHROGResponse(serport,'PHAS?')# phase offset PHAS?
+	ret = HROGQuery(serport,'PHAS?')# phase offset PHAS?
 	if ret:
 		 phas = ret[1]
 	return [stoffs,ffof,phas]
@@ -228,8 +224,8 @@ except:
 serport.flush()
 
 if args.show:
-	[stoffs,ffof,phas] = GetHROGSettings(serport)
-	print('Time offset = {} ns'.format(stoffs))
+	[toffs,ffof,phas] = GetHROGSettings(serport)
+	print('Time offset = {} ns'.format(toffs))
 	print('Fractional frequency offset = {}'.format(ffof))
 	print('Phase offset = {} deg'.format(phas))
 	Cleanup()
@@ -257,10 +253,17 @@ else:
 
 if ffs:
 	Debug('Steering')
-	# Get old settings
-	# [stoffs,ffof,phas] = GetHROGSettings(serport)
+	# Get current settings
+	[toffs,ffof,phas] = GetHROGSettings(serport)
+	Log(logFile,'current settings: TOFFS = {} FFOF = {} PHAS = {}'.format(toffs,ffof,phas))
+	
+	# Do the steer - this a step in frequency ie the SFFOF command
+	HROGCmd(serport,'SFFOF {:e}'.format(ffs)) # this gives 6 digits after the decimal point by default
+																								# note that the HROG will not necessarily echo back exactly what you sent eg 5.10 -> 5.1
 	# Get new settings
-	# [stoffs,ffof,phas] = GetHROGSettings(serport)
-	# Move the file
+	[toffs,ffof,phas] = GetHROGSettings(serport)
+	Log(logFile,'new settings: TOFFS = {} FFOF = {} PHAS = {}'.format(toffs,ffof,phas))
+
+	# Move the steering file
 	
 Cleanup()
