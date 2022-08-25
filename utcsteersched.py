@@ -205,7 +205,7 @@ Debug('Last MJD in UTCr should be ' + str(lastMJD))
 mjd1 = lastMJD - historyLength
 mjd2 = lastMJD
 
-GETDATA = True
+GETDATA = False
 
 # Get the data
 
@@ -440,9 +440,11 @@ t = np.arange(1,nTDEV,1)
 
 # PHASE OFFSET
 fig,ax = plt.subplots()
-ax.plot(mjd,utck,marker='.')
+ax.plot(mjd,utck,label='all data')
+ax.plot(statsMJD,statsUTCK,marker='.',label='stats data')
 ax.set_ylabel('phase offset UTC (ns)')
 ax.set_xlabel('MJD')
+plt.legend()
 ax.grid()
 
 plotfile1 = os.path.join(tmpDir,'utcoffset.png')
