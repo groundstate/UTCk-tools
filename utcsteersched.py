@@ -34,7 +34,13 @@ import argparse
 import datetime
 import glob
 import math
+
+# This jiggery-pokery is to stop matplotlib connecting to an X-server
+import matplotlib as mpl
+mpl.use('Agg')
+
 import matplotlib.pyplot as plt
+
 import numpy as np
 import matplotlib.ticker as mticker
 import os
@@ -55,7 +61,7 @@ sys.path.append("/usr/local/lib/python3.8/site-packages") # Ubuntu 20.04
 
 import ottplib
 
-VERSION = "0.0.4"
+VERSION = "0.0.5"
 AUTHORS = "Michael Wouters"
 
 UTCR_LATENCY = 3
