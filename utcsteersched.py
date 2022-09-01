@@ -55,8 +55,10 @@ sys.path.append("/usr/local/lib/python3.8/site-packages") # Ubuntu 20.04
 
 import ottplib
 
-VERSION = "0.0.2"
+VERSION = "0.0.3"
 AUTHORS = "Michael Wouters"
+
+UTCR_LATENCY = 3
 
 # ------------------------------------------
 def Debug(msg):
@@ -140,6 +142,7 @@ phaseGain = 0.5 # gain/weight for component of frequency adjustment due to curre
 
 UTCID = 'AUS'
 enableSteerFile = 'ENABLE_STEERING' 
+lastUTCrFile  = 'LAST_UTCR_DOWNLOAD' # file containing MJD of last UTCr download 
 
 home =os.environ['HOME'] + '/'
 user =os.environ['USER'] # remember to define this in the user's crontab
@@ -189,23 +192,34 @@ Log(logFile,'running')
 
 tt = time.time()
 mjdToday = int(tt/86400)+40587
-dt = datetime.date.today()
+Debug('MJD today is {:d}'.format(mjdToday))
+dt = datetime.datetime.today()
 dow = dt.weekday()
 yyyy = dt.year
 mm  = dt.month
 dd = dt.day
 
-# UTCr is published on Wednesday DOW = 2
+
+# UTCr is published on Wednesday 
 # There's a 3 day lag (using rapid orbits and clocks for CGGTTS tweaking ?)
 # Calculate the expected MJD in UTCr
 nWeeks = int(math.floor((mjdToday - utcrRefMJD)/7))
 lastMJD = utcrRefMJD + 7 * nWeeks
 Debug('Last MJD in UTCr should be ' + str(lastMJD))
 
+# Sanity checks
+# Should be running at least 3 days after 'lastMJD'
+if not(args.force):
+	if (mjdToday - lastMJD < UTCR_LATENCY):
+		ErrorExit('Running too early - next run needs to be at least {:d}'.format(lastMJD+3))
+	# Shouldn't run too late either
+	if (mjdToday - lastMJD > UTCR_LATENCY + 1):
+		ErrorExit('Running too late (limit is MJD {:d}) '.format(lastMJD + UTCR_LATENCY + 1))
+	
 mjd1 = lastMJD - historyLength
 mjd2 = lastMJD
 
-GETDATA = False
+GETDATA = True
 
 # Get the data
 
@@ -214,6 +228,26 @@ dutck = []
 
 if GETDATA: # TEMPORARY
 	Debug('Fetching data for interval {:d} {:d}'.format(mjd1,mjd2))
+	
+	# Have we already got the data ?
+	# Check the file lastUTCrDownload
+	fin = open(os.path.join(controlDir,lastUTCrFile),'r')
+	lastUTCr = -1 # flags failure to get this
+	for l in fin:
+		if re.match(r'^#',l): # ignore comments
+			continue
+		matches = re.match(r'MJD\s+(\d{5})',l)
+		if matches:
+			lastUTCr = int(matches.group(1))
+			Debug('Last UTCr {:d}'.format(lastUTCr))
+			break
+	fin.close()
+	
+	# We have already checked the run window (unless --force is in effect)
+	if (lastUTCr == lastMJD):
+		Debug('Nothing to do')
+		sys.exit(0)
+	
 	httpreq = '{}/get-data.html?scale=utcr&lab={}&outfile=txt&mjd1={:d}&mjd2={:d}'.format(bipmurl,UTCID,mjd1,mjd2)
 	try:
 		resp = requests.get(httpreq)
@@ -247,7 +281,13 @@ if GETDATA: # TEMPORARY
 	fout.write(resp.text)
 	fout.close()
 	Debug('Debug saved data as ' + futcr)
-
+	
+	# At this point, we can update
+	fout = open(os.path.join(controlDir,lastUTCrFile),'w')
+	fout.write('# MJD {:d} {:02d}:{:02d}:{:02d}\n'.format(mjdToday,dt.hour,dt.minute,dt.second))
+	fout.write('MJD {:d}\n'.format(lastMJD))
+	fout.close()
+	
 else: # TEMPORARY
 	futcr = os.path.join(tmpDir,'utcr.{:d}.dat'.format(lastMJD))
 	fin = open(futcr,'r')
@@ -512,7 +552,7 @@ else:
 	html += 'Est. frequency step  = {:g} ns/day <br>'.format(freqStep)
 	html += 'Est. phase slew = {:g} ns/day <br>'.format(phaseSlew)
 	
-	html += 'Total (weighted) applied frequency offset = {:g} ns/day<br>'.format(appliedOffset)
+	html += 'Total (weighted) applied frequency offset = {:g} ns/day (ffe {:g})<br>'.format(appliedOffset,appliedOffset*1.0E-9/86400.0)
 	if not(scheduleSteer):
 		if forceSteer:
 			html += '<div> <strong> STEERING WILL BE FORCED </strong> </div>'
