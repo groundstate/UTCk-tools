@@ -55,7 +55,7 @@ sys.path.append("/usr/local/lib/python3.8/site-packages") # Ubuntu 20.04
 
 import ottplib
 
-VERSION = "0.0.3"
+VERSION = "0.0.4"
 AUTHORS = "Michael Wouters"
 
 UTCR_LATENCY = 3
@@ -107,6 +107,7 @@ def Initialise(configFile):
 def FudgeData(mjds,utcr):
 	utcclk = 'cs2269'
 	clkdata = '/mnt/logger3/clocks/' + utcclk
+	#clkdata = '/home/logsys/logger_data/clocks/' + utcclk 
 	delay = 99.86 # delay to be added to align HROG - Cs2269
 	i = 0
 	for m in mjds:
@@ -147,13 +148,13 @@ lastUTCrFile  = 'LAST_UTCR_DOWNLOAD' # file containing MJD of last UTCr download
 home =os.environ['HOME'] + '/'
 user =os.environ['USER'] # remember to define this in the user's crontab
 configFile = os.path.join(home,'etc/utcsteersched.conf')
-repDir  = os.path.join(home,'utcsteer/reports')
-logDir = os.path.join(home,'utcsteer/logs')
-controlDir = os.path.join(home,'utcsteer/control')
+repDir  = os.path.join(home,'reports')
+logDir = os.path.join(home,'logs')
+controlDir = os.path.join(home,'control')
 scheduledDir = os.path.join(controlDir,'scheduled_steer')
 processedDir = os.path.join(controlDir,'processed_steers')
 historyLength = 90 # in days
-tmpDir = os.path.join(home,'utcsteer/tmp')
+tmpDir = os.path.join(home,'tmp')
 recipients = 'Michael.Wouters@measurement.gov.au'
 email = True
 bipmurl = 'https://webtai.bipm.org/api/v0.2-beta'
@@ -186,6 +187,15 @@ if ('main:email recipients' in cfg):
 	
 if ('main:reports' in cfg):
 	repDir = os.path.join(home,cfg['main:reports']) 
+	
+if ('main:log' in cfg):
+	logDir = os.path.join(home,cfg['main:log']) 
+	
+if ('main:control' in cfg):
+	controlDir = os.path.join(home,cfg['main:control']) 
+	
+if ('main:tmp' in cfg):
+	tmpDir = os.path.join(home,cfg['main:tmp']) 
 	
 logFile = os.path.join(logDir,'utcsteer.log') # this log will be common to several scripts
 Log(logFile,'running')
