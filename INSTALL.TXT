@@ -1,9 +1,0 @@
-You need
-
-numpy  (python3-numpy)    
-scipy  (python3-scipy)
-matplotlib (python3-matplotlib)
-htmldoc  
-htmldoc  (htmldoc-common)
-
-allantools (pip3 install allantools)
