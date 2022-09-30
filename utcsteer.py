@@ -33,18 +33,24 @@ import glob
 import os
 import re
 import serial
+import shutil
 import subprocess
 import sys
 import time
 
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from email.mime.image import MIMEImage
 
 # This is where ottplib is installed
 sys.path.append("/usr/local/lib/python3.6/site-packages") # Ubuntu 18.04
 sys.path.append("/usr/local/lib/python3.8/site-packages") # Ubuntu 20.04
+sys.path.append("/usr/local/lib/python3.10/site-packages") # Ubuntu 22.04
 
 import ottplib
 
-VERSION = "0.0.1"
+VERSION = "0.0.2"
 AUTHORS = "Michael Wouters"
 
 BaudRates = [9600,14400,19200,28800,38400,57600,115200]
@@ -141,15 +147,26 @@ def GetHROGSettings(serport):
 
 appName = os.path.basename(sys.argv[0])
 debug = False
+email = True
+recipients = 'Michael.Wouters@measurement.gov.au'
+UTCID = 'AUS'
+
+maxClockFOffset = 10.0 # ns/day
+maxClockFOffset = maxClockFOffset * 1.0E-9/86400.0
+
+tt = time.time()
+mjdToday = int(tt/86400)+40587
+Debug('MJD today is {:d}'.format(mjdToday))
+dt = datetime.datetime.today()
 
 home =os.environ['HOME'] + '/'
 user =os.environ['USER'] # remember to define this in the user's crontab
 configFile = os.path.join(home,'etc/utcsteer.conf')
 ussConfigFile = os.path.join(home,'etc/utcsteersched.conf')
-logDir = os.path.join(home,'utcsteer/logs')
-controlDir = os.path.join(home,'utcsteer/control')
+logDir = os.path.join(home,'logs')
+controlDir = os.path.join(home,'control')
 scheduledDir = os.path.join(controlDir,'scheduled_steer')
-processedDir = os.path.join(controlDir,'processed_steers')
+processedDir = os.path.join(controlDir,'processed_steer')
 
 parser = argparse.ArgumentParser(description='Executes a steer calculated and scheduled by utcsteersched.py',
 	formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -231,6 +248,16 @@ if args.show:
 	Cleanup()
 	sys.exit(0)
 
+UTCstr = 'UTC(' + UTCID +')'
+html =  '<html>'
+html += '<head></head>'
+html += '<body>'
+html += '<H2>' + UTCstr + ' steering advisory for '+  dt.strftime('%Y-%m-%d') + '</H2>'
+html += '<br>'
+
+html += 'Current MJD is ' + str(mjdToday) + '<br>'
+html += '<br>'
+
 # Check for a scheduled steer
 steers = glob.glob(os.path.join(scheduledDir,'steer*.dat'))
 
@@ -238,32 +265,64 @@ ffs = None
 
 if (len(steers)==0):
 	Log(logFile,'no steers are scheduled')
+	html += '<div> <strong> NO STEERS ARE SCHEDULED </div> </strong>'
 elif (len(steers)==1):
 	Debug('Found ' + steers[0])
+	# FIXME apply some sanity checks to the file
+	
 	fin = open(steers[0],'r')
 	
 	for l in fin:
 		if re.match(r'^\s*#',l):
 			continue
 		ffs = float(l)
+		# Apply sanity checks to the offset
+		if abs(ffs) > maxClockFOffset:
+			Log(logFile,'Scheduled steer {:e} exceeds permitted maximum of {:e} - NOT STEERED'.format(ffs,maxClockFOffset))
+			html += '<div> <strong>  Scheduled steer {:e} exceeds {:e} - NOT STEERED </div> </strong>'.format(ffs,maxClockFOffset)
+			ffs = None
 		break
 	fin.close()
 else:
-	Log(logFile,'too many unprocessed steers')
+	Log(logFile,'too many unprocessed steers in {}'.format(scheduledDir))
+	html += '<div> <strong> TOO MANY UNPROCESSED STEERS </div> </strong>'
 
 if ffs:
 	Debug('Steering')
 	# Get current settings
 	[toffs,ffof,phas] = GetHROGSettings(serport)
 	Log(logFile,'current settings: TOFFS = {} FFOF = {} PHAS = {}'.format(toffs,ffof,phas))
+	html += '<div> Current settings: TOFFS = {} FFOF = {} PHAS = {} </div>'.format(toffs,ffof,phas)
+	# FIXME check that values are as expected ?
 	
-	# Do the steer - this a step in frequency ie the SFFOF command
+	# Do the steer - this is a step in frequency ie the SFFOF command
 	HROGCmd(serport,'SFFOF {:e}'.format(ffs)) # this gives 6 digits after the decimal point by default
 																								# note that the HROG will not necessarily echo back exactly what you sent eg 5.10 -> 5.1
 	# Get new settings
 	[toffs,ffof,phas] = GetHROGSettings(serport)
 	Log(logFile,'new settings: TOFFS = {} FFOF = {} PHAS = {}'.format(toffs,ffof,phas))
-
+	html += '<div> New settings: TOFFS = {} FFOF = {} PHAS = {} </div>'.format(toffs,ffof,phas)
+	
+	# FIXME Check that the steer was nominal
+	
 	# Move the steering file
+	shutil.move(steers[0],processedDir)
+	
+if email:
+	sender = 'time@measurement.gov.au'
+
+	msg = MIMEMultipart('related')
+	msg['Subject'] = 'UTC steer  for ' + dt.strftime('%Y-%m-%d')
+	msg['From'] = sender
+	msg['To'] = recipients
+	msg['Reply-To'] = sender
+
+	body = MIMEText(html,'html')
+	msg.attach(body)
+
+	# Send the message via local SMTP server.
+	s = smtplib.SMTP('copperhead.in.measurement.gov.au')
+	s.sendmail([recipients],['time@measurement.gov.au'], msg.as_string())
+	s.quit()
 	
 Cleanup()
