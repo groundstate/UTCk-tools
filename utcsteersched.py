@@ -27,8 +27,6 @@
 # Report on planned steering of UTC(AUS) using Rapid UTC
 # 
 
-
-
 import allantools
 import argparse
 import datetime
@@ -61,7 +59,7 @@ sys.path.append("/usr/local/lib/python3.8/site-packages") # Ubuntu 20.04
 
 import ottplib
 
-VERSION = "0.0.5"
+VERSION = "0.0.6"
 AUTHORS = "Michael Wouters"
 
 UTCR_LATENCY = 3
@@ -335,7 +333,9 @@ steerMsgs = ''
 # TODO Check if there is an unprocessed steer
 
 # This is temporary code for testing
-FudgeData(mjd,utck)
+UTCr_PHYCLK = np.array(utck) # Currently, UTCr reports our physical clock Cs2269
+UTCr_HROG   = np.array(utck) # Initialise it
+FudgeData(mjd,UTCr_HROG) # and then correct it: UTCr_HROG = UTCr - (HROG-PHYCLK), where latter term comesfrom logger 
 
 if enableSteer or forceSteer:
 	if enableSteer:
@@ -344,7 +344,6 @@ if enableSteer or forceSteer:
 		Log(logFile,'Steering is FORCED')
 		
 	# Calculate the steering parameters
-	
 	
 	# TODO Check when we last steered
 
@@ -388,8 +387,15 @@ if enableSteer or forceSteer:
 	# It should be stopMJD + 1
 	# nextStartMJD = 7*(ceil(stopMJD+1)/7);
 
-	# Estimate the frequency offset to be applied to make the frequency offset == 0
-
+	# Steering algorithm, based on Chadsey et al 
+	# A steer is constructed from two frequency adjustments
+	# (1) Estimate the mean ffe using the last 7 days of UTCr datand use this to zero the mean ffe
+	# (2) Get the current (last day in UTCr) phase offset and apply a frequency offset to zero it over the next 7 days
+	# The total steer is the weighted sum of the two
+	
+	# Estimate the TOTAL frequency offset to be applied to make the frequency offset == 0
+	# This comes from UTCr_PHYCLK
+	
 	# If there are insufficient points for a fit then do not proceed
 	# (Maybe we missed a UCTr reporting deadline)
 	if npts < minFitPts:
@@ -400,7 +406,7 @@ if enableSteer or forceSteer:
 
 	# Filter data using the mask
 	mjdFit = []
-	utckFit = []
+	freqFit = []
 	nMasked = 0
 	for im in range(iStartMJD,iStopMJD+1):
 		masked = False
@@ -411,16 +417,11 @@ if enableSteer or forceSteer:
 				Debug('Masking {:d}'.format(mjd[im]))
 		if not(masked): # so that we only add once per MJD
 			mjdFit.append(mjd[im])
-			utckFit.append(utck[im])
+			freqFit.append(UTCr_PHYCLK[im])
+			
 	Debug('Masked {:d} point(s)'.format(nMasked))
 	
-	# Steering algorithm, based on Chadsey et al 
-	# A steer is constructed from two frequency adjustments
-	# (1) Estimate the mean ffe using the last 7 days of UTCr and use this to zero the mean ffe
-	# (2) Get the current (last day in UTCr) phase offset and apply a frequency offset to zero it over the next 7 days
-	# The total steer is the weighted sum of the two
-	
-	coeff = np.polyfit( mjdFit - mjdFit[0],utckFit - utck[0],1) # units are ns/day
+	coeff = np.polyfit( mjdFit - mjdFit[0],freqFit - freqFit[0],1) # units are ns/day
 	meanfOffset = -coeff[0] # note the sign! Units are ns/day (the applied frequency steer will have opposite sign)
 	freqStep = -meanfOffset
 	
@@ -434,7 +435,7 @@ if enableSteer or forceSteer:
 		Log(logFile,msg)
 
 	# Calculate the slew rate required to zero the offset
-	currPhaseOffset = utckFit[-1];
+	currPhaseOffset = UTCr_HROG[-1];
 	Debug('Current phase offset = {:g} ns'.format(currPhaseOffset))
 	phaseSlew = currPhaseOffset/7;
 	Debug('Est. phase offset slew: {:g} ns/day)'.format(phaseSlew))
@@ -468,7 +469,7 @@ if (enableSteer and scheduleSteer) or forceSteer:
 # For the moment, we'll ignore the effect of gaps
 statsMJD = [] # don't actually need this ATM
 statsUTCK = []
-mjdutck = zip(mjd,utck)
+mjdutck = zip(mjd,UTCr_HROG)
 
 for m,u in mjdutck:
 	masked = False
@@ -565,8 +566,8 @@ else:
 	html += 'Est. mean frequency offset = {:g} ns/day<br>'.format(meanfOffset)
 	html += 'Current phase offset = {:g} ns <br>'.format(currPhaseOffset)
 	
-	html += 'Est. frequency step  = {:g} ns/day <br>'.format(freqStep)
-	html += 'Est. phase slew = {:g} ns/day <br>'.format(phaseSlew)
+	html += 'Est. applied frequency offset  = {:g} ns/day <br>'.format(freqStep)
+	html += 'Est. applied phase slew = {:g} ns/day <br>'.format(phaseSlew)
 	
 	html += 'Total (weighted) applied frequency offset = {:g} ns/day (ffe {:g})<br>'.format(appliedOffset,appliedOffset*1.0E-9/86400.0)
 	if not(scheduleSteer):

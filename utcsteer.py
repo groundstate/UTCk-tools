@@ -50,7 +50,7 @@ sys.path.append("/usr/local/lib/python3.10/site-packages") # Ubuntu 22.04
 
 import ottplib
 
-VERSION = "0.0.2"
+VERSION = "0.0.3"
 AUTHORS = "Michael Wouters"
 
 BaudRates = [9600,14400,19200,28800,38400,57600,115200]
@@ -288,16 +288,19 @@ else:
 	html += '<div> <strong> TOO MANY UNPROCESSED STEERS </div> </strong>'
 
 if ffs:
-	Debug('Steering')
+	
 	# Get current settings
 	[toffs,ffof,phas] = GetHROGSettings(serport)
 	Log(logFile,'current settings: TOFFS = {} FFOF = {} PHAS = {}'.format(toffs,ffof,phas))
 	html += '<div> Current settings: TOFFS = {} FFOF = {} PHAS = {} </div>'.format(toffs,ffof,phas)
 	# FIXME check that values are as expected ?
 	
-	# Do the steer - this is a step in frequency ie the SFFOF command
-	HROGCmd(serport,'SFFOF {:e}'.format(ffs)) # this gives 6 digits after the decimal point by default
-																								# note that the HROG will not necessarily echo back exactly what you sent eg 5.10 -> 5.1
+	Debug('Steering')
+	
+	# Do the steer - this is total offset frequency ie the FFOF command
+	HROGCmd(serport,'FFOF {:e}'.format(ffs)) # this gives 6 digits after the decimal point by default
+	
+	# note that the HROG will not necessarily echo back exactly what you sent eg 5.10 -> 5.1
 	# Get new settings
 	[toffs,ffof,phas] = GetHROGSettings(serport)
 	Log(logFile,'new settings: TOFFS = {} FFOF = {} PHAS = {}'.format(toffs,ffof,phas))
