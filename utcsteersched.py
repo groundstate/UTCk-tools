@@ -59,7 +59,7 @@ sys.path.append("/usr/local/lib/python3.8/site-packages") # Ubuntu 20.04
 
 import ottplib
 
-VERSION = "0.0.6"
+VERSION = "0.0.7"
 AUTHORS = "Michael Wouters"
 
 UTCR_LATENCY = 3
@@ -110,8 +110,7 @@ def Initialise(configFile):
 # ------------------------------------------
 def FudgeData(mjds,utcr):
 	utcclk = 'cs2269'
-	clkdata = '/mnt/logger3/clocks/' + utcclk
-	#clkdata = '/home/logsys/logger_data/clocks/' + utcclk 
+	clkdata =os.path.join(clockDataDir,utcclk)
 	delay = 99.86 # delay to be added to align HROG - Cs2269
 	i = 0
 	for m in mjds:
@@ -128,7 +127,7 @@ def FudgeData(mjds,utcr):
 				break
 			fin.close()
 		else:
-			pass
+			Debug('Unable to open ' + fname)
 		i += 1
 
 # ------------------------------------------
@@ -152,6 +151,7 @@ lastUTCrFile  = 'LAST_UTCR_DOWNLOAD' # file containing MJD of last UTCr download
 home =os.environ['HOME'] + '/'
 user =os.environ['USER'] # remember to define this in the user's crontab
 configFile = os.path.join(home,'etc/utcsteersched.conf')
+clockDataDir = '/home/logsys/logger_data/clocks'
 repDir  = os.path.join(home,'reports')
 logDir = os.path.join(home,'logs')
 controlDir = os.path.join(home,'control')
@@ -200,6 +200,9 @@ if ('main:control' in cfg):
 	
 if ('main:tmp' in cfg):
 	tmpDir = os.path.join(home,cfg['main:tmp']) 
+
+if ('main:clock data' in cfg):
+	clockDataDir = cfg['main:clock data']
 	
 logFile = os.path.join(logDir,'utcsteer.log') # this log will be common to several scripts
 Log(logFile,'running')
@@ -233,7 +236,7 @@ if not(args.force):
 mjd1 = lastMJD - historyLength
 mjd2 = lastMJD
 
-GETDATA = True
+GETDATA = True # TEMPORARY
 
 # Get the data
 
@@ -245,23 +248,26 @@ if GETDATA: # TEMPORARY
 	
 	# Have we already got the data ?
 	# Check the file lastUTCrDownload
-	fin = open(os.path.join(controlDir,lastUTCrFile),'r')
-	lastUTCr = -1 # flags failure to get this
-	for l in fin:
-		if re.match(r'^#',l): # ignore comments
-			continue
-		matches = re.match(r'MJD\s+(\d{5})',l)
-		if matches:
-			lastUTCr = int(matches.group(1))
-			Debug('Last UTCr {:d}'.format(lastUTCr))
-			break
-	fin.close()
-	
-	# We have already checked the run window (unless --force is in effect)
-	if (lastUTCr == lastMJD):
-		Debug('Nothing to do')
-		sys.exit(0)
-	
+	if (os.path.exists(os.path.join(controlDir,lastUTCrFile))):
+		fin = open(os.path.join(controlDir,lastUTCrFile),'r')
+		lastUTCr = -1 # flags failure to get this
+		for l in fin:
+			if re.match(r'^#',l): # ignore comments
+				continue
+			matches = re.match(r'MJD\s+(\d{5})',l)
+			if matches:
+				lastUTCr = int(matches.group(1))
+				Debug('Last UTCr {:d}'.format(lastUTCr))
+				break
+		fin.close()
+		
+		# We have already checked the run window (unless --force is in effect)
+		if (lastUTCr == lastMJD):
+			Debug('Nothing to do')
+			sys.exit(0)
+	else:
+		Debug('No UTCr download record was found .. downloading')
+		
 	httpreq = '{}/get-data.html?scale=utcr&lab={}&outfile=txt&mjd1={:d}&mjd2={:d}'.format(bipmurl,UTCID,mjd1,mjd2)
 	try:
 		resp = requests.get(httpreq)
@@ -323,12 +329,16 @@ Debug('UTCr data: first = {:d}, last = {:d}'.format(dmjd[0],dmjd[-1]))
 mjd = np.array(dmjd)
 utck = np.array(dutck)
 
+steerMsgs = ''
+
 # Check if steering is disabled eg for manual control
 enableSteer = False # default is to NOT steer
 if (os.path.exists(os.path.join(controlDir,enableSteerFile))):
 	enableSteer = True
-	
-steerMsgs = ''
+else:
+	Debug('No steering file so NO STEER')
+	steerMsgs = 'No steering file so NO STEER' # file MUST exist
+
 
 # TODO Check if there is an unprocessed steer
 
@@ -488,17 +498,19 @@ nTDEV   = int(nData/3)
 # TOTDEV/...
 t = np.arange(1,nTOTDEV,1)
 (taus, devs, errors, ns) = allantools.totdev(statsUTCK,rate = 1.0,taus=t)
+(phyclktaus, phyclkdevs, errors, ns) = allantools.totdev(UTCr_PHYCLK,rate = 1.0,taus=t)
 
 # TDEV/...
 t = np.arange(1,nTDEV,1)
 (tdtaus, tddevs, errors, ns) = allantools.tdev(statsUTCK,rate = 1.0,taus=t)
+(phyclktdtaus, phyclktddevs, errors, ns) = allantools.tdev(UTCr_PHYCLK,rate = 1.0,taus=t)
 
 # Now make the report
 
 # PHASE OFFSET
 fig,ax = plt.subplots()
-ax.plot(mjd,utck,label='all data')
-ax.plot(statsMJD,statsUTCK,marker='.',label='stats data')
+ax.plot(statsMJD,statsUTCK,marker='.',label='UTCr - UTC(AUS)')
+ax.plot(mjd,UTCr_PHYCLK,label='UTCr - PHYCLK')
 ax.set_ylabel('phase offset UTC (ns)')
 ax.set_xlabel('MJD')
 plt.legend()
@@ -513,13 +525,15 @@ if args.show:
 # TDEV
 fig,ax = plt.subplots()
 
-ax.loglog(tdtaus,tddevs,'.-')
+ax.loglog(tdtaus,tddevs,'.-',label='UTCr - UTC(AUS)')
+ax.loglog(phyclktdtaus,phyclktddevs,'.-',label='UTCr - PHYCLK')
 
 ax.xaxis.set_major_formatter(mticker.ScalarFormatter())
 ax.yaxis.set_minor_formatter(mticker.ScalarFormatter())
 ax.yaxis.set_major_formatter(mticker.ScalarFormatter())
 ax.set_ylabel('TDEV (ns)')
 ax.set_xlabel('tau (days)')
+plt.legend()
 ax.grid()
 
 plotfile2 = os.path.join(tmpDir,'tdev.png')
@@ -531,7 +545,8 @@ if args.show:
 # TOTDEV
 fig, ax = plt.subplots()
 #ax3.set_title('UTC TOTDEV')
-ax.loglog(taus,devs*1.0E-9/86400*1.0E14,'.-')
+ax.loglog(taus,devs*1.0E-9/86400*1.0E14,'.-',label='UTCr - UTC(AUS)')
+ax.loglog(phyclktaus,phyclkdevs*1.0E-9/86400*1.0E14,'.-',label='UTCr - PHYCLK')
 
 ax.xaxis.set_major_formatter(mticker.ScalarFormatter())
 ax.yaxis.set_minor_formatter(mticker.ScalarFormatter())
@@ -540,6 +555,7 @@ ax.yaxis.set_major_formatter(mticker.ScalarFormatter())
 ax.xaxis.set_major_formatter(mticker.ScalarFormatter())
 ax.set_ylabel('frac TOTDEV (10E-14 Hz/Hz)')
 ax.set_xlabel('tau (days)')
+plt.legend()
 ax.grid()
 
 plotfile3 = os.path.join(tmpDir,'dev.png')
