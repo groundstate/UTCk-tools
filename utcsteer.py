@@ -50,7 +50,7 @@ sys.path.append("/usr/local/lib/python3.10/site-packages") # Ubuntu 22.04
 
 import ottplib
 
-VERSION = "0.0.3"
+VERSION = "0.0.4"
 AUTHORS = "Michael Wouters"
 
 BaudRates = [9600,14400,19200,28800,38400,57600,115200]
@@ -151,8 +151,9 @@ email = True
 recipients = 'Michael.Wouters@measurement.gov.au'
 UTCID = 'AUS'
 
-maxClockFOffset = 10.0 # ns/day
-maxClockFOffset = maxClockFOffset * 1.0E-9/86400.0
+# Limits on the applied frequency step
+maxFSTEP = 1.0E-13 # a bit less than our accredited uncertainty
+maxFFOF  = 5.0E-13 # maximum tolerated fractional frequency offset
 
 tt = time.time()
 mjdToday = int(tt/86400)+40587
@@ -168,11 +169,15 @@ controlDir = os.path.join(home,'control')
 scheduledDir = os.path.join(controlDir,'scheduled_steer')
 processedDir = os.path.join(controlDir,'processed_steer')
 
+SMTPserver = 'copperhead.in.measurement.gov.au'
+emailSender = 'time@measurement.gov.au'
+
 parser = argparse.ArgumentParser(description='Executes a steer calculated and scheduled by utcsteersched.py',
 	formatter_class=argparse.RawDescriptionHelpFormatter)
 
 parser.add_argument('--config','-c',help='use an alternate configuration file',default=configFile)
 parser.add_argument('--debug','-d',help='debug',action='store_true')
+parser.add_argument('--dryrun',help='do everything except steer and move the steer file',action='store_true')
 parser.add_argument('--show','-s',help='show HROG settings',action='store_true')
 parser.add_argument('--version','-v',action='version',version = os.path.basename(sys.argv[0])+ ' ' + VERSION + '\n' + 'Written by ' + AUTHORS)
 
@@ -184,10 +189,6 @@ configFile = args.config;
 
 if (not os.path.isfile(configFile)):
 	ErrorExit(configFile + ' not found')
-	
-logPath = os.path.join(home,'logs')
-if (not os.path.isdir(logPath)):
-	ErrorExit(logPath + "not found")
 
 cfg=Initialise(configFile)
 
@@ -241,10 +242,10 @@ except:
 serport.flush()
 
 if args.show:
-	[toffs,ffof,phas] = GetHROGSettings(serport)
-	print('Time offset = {} ns'.format(toffs))
-	print('Fractional frequency offset = {}'.format(ffof))
-	print('Phase offset = {} deg'.format(phas))
+	[currTOFFS,currFFOF,currPHAS] = GetHROGSettings(serport)
+	print('Time offset = {} ns'.format(currTOFFS))
+	print('Fractional frequency offset = {}'.format(currFFOF))
+	print('Phase offset = {} deg'.format(currPHAS))
 	Cleanup()
 	sys.exit(0)
 
@@ -261,71 +262,83 @@ html += '<br>'
 # Check for a scheduled steer
 steers = glob.glob(os.path.join(scheduledDir,'steer*.dat'))
 
-ffs = None
+newFFOF = None
 
 if (len(steers)==0):
 	Log(logFile,'no steers are scheduled')
 	html += '<div> <strong> NO STEERS ARE SCHEDULED </div> </strong>'
 elif (len(steers)==1):
 	Debug('Found ' + steers[0])
-	# FIXME apply some sanity checks to the file
+	
+	# Get current settings
+	[currTOFFS,currFFOF,currPHAS] = GetHROGSettings(serport)
+	msg = 'Current settings: TOFFS = {} FFOF = {} PHAS = {}'.format(currTOFFS,currFFOF,currPHAS)
+	Log(logFile,msg)
+	html += '<div> ' + msg + ' </div>'
 	
 	fin = open(steers[0],'r')
 	
 	for l in fin:
 		if re.match(r'^\s*#',l):
 			continue
-		ffs = float(l)
-		# Apply sanity checks to the offset
-		if abs(ffs) > maxClockFOffset:
-			Log(logFile,'Scheduled steer {:e} exceeds permitted maximum of {:e} - NOT STEERED'.format(ffs,maxClockFOffset))
-			html += '<div> <strong>  Scheduled steer {:e} exceeds {:e} - NOT STEERED </div> </strong>'.format(ffs,maxClockFOffset)
-			ffs = None
+		newFFOF = float(l)
+		currFFOF = float(currFFOF)
+		# Apply sanity checks to the frequency step
+		# Never step more than a maximum amount and clamp the maximum frequency offset
+		if (abs(newFFOF - currFFOF) > maxFSTEP) :
+			msg = 'Scheduled steer {:e} exceeds permitted maximum step of {:e} - NOT STEERED'.format(newFFOF,maxFSTEP)
+			Log(logFile,msg)
+			html += '<div> <strong> ' + msg + ' </div> </strong>'
+			newFFOF = None
+		elif (abs(newFFOF) > maxFFOF):
+			msg = 'Scheduled steer {:e} exceeds permitted maximum FFE of {:e} - NOT STEERED'.format(newFFOF,maxFFOF)
+			Log(logFile,msg)
+			html += '<div> <strong> ' + msg + ' </div> </strong>'
+			newFFOF = None
+			
 		break
 	fin.close()
 else:
 	Log(logFile,'too many unprocessed steers in {}'.format(scheduledDir))
 	html += '<div> <strong> TOO MANY UNPROCESSED STEERS </div> </strong>'
 
-if ffs:
+if newFFOF:
 	
-	# Get current settings
-	[toffs,ffof,phas] = GetHROGSettings(serport)
-	Log(logFile,'current settings: TOFFS = {} FFOF = {} PHAS = {}'.format(toffs,ffof,phas))
-	html += '<div> Current settings: TOFFS = {} FFOF = {} PHAS = {} </div>'.format(toffs,ffof,phas)
 	# FIXME check that values are as expected ?
 	
 	Debug('Steering')
 	
 	# Do the steer - this is total offset frequency ie the FFOF command
-	HROGCmd(serport,'FFOF {:e}'.format(ffs)) # this gives 6 digits after the decimal point by default
+	if not(args.dryrun):
+		HROGCmd(serport,'FFOF {:e}'.format(newFFOF)) # this gives 6 digits after the decimal point by default
 	
 	# note that the HROG will not necessarily echo back exactly what you sent eg 5.10 -> 5.1
 	# Get new settings
 	[toffs,ffof,phas] = GetHROGSettings(serport)
-	Log(logFile,'new settings: TOFFS = {} FFOF = {} PHAS = {}'.format(toffs,ffof,phas))
-	html += '<div> New settings: TOFFS = {} FFOF = {} PHAS = {} </div>'.format(toffs,ffof,phas)
+	msg = 'New settings: TOFFS = {} FFOF = {} PHAS = {}'.format(toffs,ffof,phas)
+	Log(logFile,msg)
+	html += '<div> ' + msg + ' </div>'.format(toffs,ffof,phas)
 	
 	# FIXME Check that the steer was nominal
 	
 	# Move the steering file
-	shutil.move(steers[0],processedDir)
+	if not(args.dryrun):
+		shutil.move(steers[0],processedDir)
 	
 if email:
-	sender = 'time@measurement.gov.au'
-
+	
 	msg = MIMEMultipart('related')
 	msg['Subject'] = 'UTC steer  for ' + dt.strftime('%Y-%m-%d')
-	msg['From'] = sender
+	msg['From'] = emailSender
 	msg['To'] = recipients
-	msg['Reply-To'] = sender
+	msg['Reply-To'] = emailSender
 
 	body = MIMEText(html,'html')
 	msg.attach(body)
 
 	# Send the message via local SMTP server.
-	s = smtplib.SMTP('copperhead.in.measurement.gov.au')
-	s.sendmail([recipients],['time@measurement.gov.au'], msg.as_string())
+	s = smtplib.SMTP(SMTPserver)
+	s.sendmail([recipients],[emailSender], msg.as_string())
 	s.quit()
 	
 Cleanup()
