@@ -50,7 +50,7 @@ sys.path.append("/usr/local/lib/python3.10/site-packages") # Ubuntu 22.04
 
 import ottplib
 
-VERSION = "0.0.4"
+VERSION = "0.0.5"
 AUTHORS = "Michael Wouters"
 
 BaudRates = [9600,14400,19200,28800,38400,57600,115200]
@@ -338,7 +338,7 @@ if email:
 
 	# Send the message via local SMTP server.
 	s = smtplib.SMTP(SMTPserver)
-	s.sendmail([recipients],[emailSender], msg.as_string())
+	s.sendmail([emailSender],[recipients], msg.as_string())
 	s.quit()
 	
 Cleanup()
