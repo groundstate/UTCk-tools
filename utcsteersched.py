@@ -60,7 +60,7 @@ sys.path.append("/usr/local/lib/python3.10/site-packages") # Ubuntu 22.04
 
 import ottplib
 
-VERSION = "0.0.8"
+VERSION = "0.0.9"
 AUTHORS = "Michael Wouters"
 
 UTCR_LATENCY = 3
@@ -655,7 +655,7 @@ if email:
 
 	# Send the message via local SMTP server.
 	s = smtplib.SMTP('copperhead.in.measurement.gov.au')
-	s.sendmail(['time@measurement.gov.au'],[recipients], msg.as_string())
+	s.sendmail(sender,recipients.split(','), msg.as_string())
 	s.quit()
 
 # cleanup temporary files
