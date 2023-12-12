@@ -54,12 +54,13 @@ from email.mime.text import MIMEText
 from email.mime.image import MIMEImage
 
 # This is where ottplib is installed
-sys.path.append("/usr/local/lib/python3.6/site-packages") # Ubuntu 18.04
-sys.path.append("/usr/local/lib/python3.8/site-packages") # Ubuntu 20.04
+sys.path.append("/usr/local/lib/python3.6/site-packages")  # Ubuntu 18.04
+sys.path.append("/usr/local/lib/python3.8/site-packages")  # Ubuntu 20.04
+sys.path.append("/usr/local/lib/python3.10/site-packages") # Ubuntu 22.04
 
 import ottplib
 
-VERSION = "0.0.7"
+VERSION = "0.0.8"
 AUTHORS = "Michael Wouters"
 
 UTCR_LATENCY = 3
@@ -654,7 +655,7 @@ if email:
 
 	# Send the message via local SMTP server.
 	s = smtplib.SMTP('copperhead.in.measurement.gov.au')
-	s.sendmail([recipients],['time@measurement.gov.au'], msg.as_string())
+	s.sendmail(['time@measurement.gov.au'],[recipients], msg.as_string())
 	s.quit()
 
 # cleanup temporary files
