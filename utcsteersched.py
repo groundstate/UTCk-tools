@@ -60,7 +60,7 @@ sys.path.append("/usr/local/lib/python3.10/site-packages") # Ubuntu 22.04
 
 import ottplib
 
-VERSION = "0.0.9"
+VERSION = "0.0.10"
 AUTHORS = "Michael Wouters"
 
 UTCR_LATENCY = 3
@@ -162,7 +162,7 @@ historyLength = 90 # in days
 tmpDir = os.path.join(home,'tmp')
 recipients = 'Michael.Wouters@measurement.gov.au'
 email = True
-bipmurl = 'https://webtai.bipm.org/api/v0.2-beta'
+bipmurl = 'https://webtai.bipm.org/api/v1.0'
 
 parser = argparse.ArgumentParser(description='Report on UTCr(k) from Rapid UTC data',
 	formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -282,7 +282,7 @@ if GETDATA: # TEMPORARY
 		if re.match('#',l): # ignore comments
 			continue
 		ldata = l.split()
-		if len(ldata) == 2:
+		if len(ldata) == 3: # v0.2 had two fields, v1.0 has three 
 			try:
 				dmjd.append(int(ldata[0]))
 				dutck.append(float(ldata[1]))
@@ -316,7 +316,7 @@ else: # TEMPORARY
 		if re.match('\s*#',l): # ignore comments
 			continue
 		ldata = l.split()
-		if len(ldata) == 2:
+		if len(ldata) == 3: # v0.2 had two fields, v1.0 has three 
 			try:
 				dmjd.append(int(ldata[0]))
 				dutck.append(float(ldata[1]))
