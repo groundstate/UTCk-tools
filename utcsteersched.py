@@ -26,6 +26,11 @@
 #
 # Report on planned steering of UTC(AUS) using Rapid UTC
 # 
+# Needs
+#  control/scheduled_steer
+#  control/processed_steers
+#  log
+#  tmp
 
 import allantools
 import argparse
@@ -53,34 +58,29 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.image import MIMEImage
 
-# This is where ottplib is installed
+# This is where ottp is installed
 sys.path.append("/usr/local/lib/python3.6/site-packages")  # Ubuntu 18.04
 sys.path.append("/usr/local/lib/python3.8/site-packages")  # Ubuntu 20.04
 sys.path.append("/usr/local/lib/python3.10/site-packages") # Ubuntu 22.04
 
-import ottplib
+import ottplib as ottp
 
-VERSION = "0.0.10"
+VERSION = "1.0.0"
 AUTHORS = "Michael Wouters"
 
 UTCR_LATENCY = 3
 
-# ------------------------------------------
-def Debug(msg):
-	if (debug):
-		sys.stderr.write(msg+'\n')
-	return
 
 # ------------------------------------------
 def Log(logFile,msg):
-	Debug(msg)
+	ottp.Debug(msg)
 	try:
 		flog = open(logFile,'a')
 		flog.write('{} {}\n'.format(time.strftime('%Y-%m-%d %H:%M:%S',time.gmtime()),msg))
 		flog.close()
 		flog.close()
 	except:
-		Debug('Unable to log message')
+		ottp.Debug('Unable to log message')
 	return
 
 # ------------------------------------------
@@ -96,7 +96,7 @@ def ErrorExit(msg):
 	
 # ------------------------------------------
 def Initialise(configFile):
-	cfg=ottplib.LoadConfig(configFile,{'tolower':True})
+	cfg=ottp.LoadConfig(configFile,{'tolower':True})
 	if (cfg == None):
 		ErrorExit("Error loading " + configFile)
 		
@@ -107,30 +107,8 @@ def Initialise(configFile):
 			ErrorExit("The required configuration entry " + k + " is undefined")
 		
 	return cfg
-	
-# ------------------------------------------
-def FudgeData(mjds,utcr):
-	utcclk = 'cs2269'
-	clkdata =os.path.join(clockDataDir,utcclk)
-	delay = 99.86 # delay to be added to align HROG - Cs2269
-	i = 0
-	for m in mjds:
-		fname = '{}/{:d}.{}'.format(clkdata,m,utcclk)
-		if (os.path.exists(fname)):
-			fin = open(fname,'r')
-			for l in fin:
-				if re.match('#',l):
-					continue
-				[tod,rdg] = l.split()
-				Debug('{:d} {} {}'.format(m,tod,rdg))
-				utcr[i] = utcr[i] - float(rdg) + delay
-				Debug('{:d} {} {} -> {:g}'.format(m,tod,rdg,utcr[i]))
-				break
-			fin.close()
-		else:
-			Debug('Unable to open ' + fname)
-		i += 1
 
+		
 # ------------------------------------------
 
 appName = os.path.basename(sys.argv[0])
@@ -145,7 +123,9 @@ utcrRefMJD = 56473 # Last MJD for UTCr_1326
 freqGain = 0.5 # gain/weight for component of frequency adjustment due to mean frequency offset 
 phaseGain = 0.5 # gain/weight for component of frequency adjustment due to current phase offset
 
-UTCID = 'AUS'
+UTCID  = 'AUS'
+PHYCLK = 'cs2269' # physical clock that is the flywheel driving the HROG
+
 enableSteerFile = 'ENABLE_STEERING' 
 lastUTCrFile  = 'LAST_UTCR_DOWNLOAD' # file containing MJD of last UTCr download 
 
@@ -175,7 +155,8 @@ parser.add_argument('--version','-v',action='version',version = appName + ' ' + 
 
 args = parser.parse_args()
 
-debug = args.debug
+ottp.SetDebugging(args.debug)
+
 configFile = args.config
 forceSteer = args.force
 
@@ -204,13 +185,16 @@ if ('main:tmp' in cfg):
 
 if ('main:clock data' in cfg):
 	clockDataDir = cfg['main:clock data']
+
+if ('main:flywheel' in cfg):
+	PHYCLK = cfg['main:flywheel']
 	
 logFile = os.path.join(logDir,'utcsteer.log') # this log will be common to several scripts
 Log(logFile,'running')
 
 tt = time.time()
 mjdToday = int(tt/86400)+40587
-Debug('MJD today is {:d}'.format(mjdToday))
+ottp.Debug('MJD today is {:d}'.format(mjdToday))
 dt = datetime.datetime.today()
 dow = dt.weekday()
 yyyy = dt.year
@@ -223,7 +207,7 @@ dd = dt.day
 # Calculate the expected MJD in UTCr
 nWeeks = int(math.floor((mjdToday - utcrRefMJD)/7))
 lastMJD = utcrRefMJD + 7 * nWeeks
-Debug('Last MJD in UTCr should be ' + str(lastMJD))
+ottp.Debug('Last MJD in UTCr should be ' + str(lastMJD))
 
 # Sanity checks
 # Should be running at least 3 days after 'lastMJD'
@@ -237,94 +221,76 @@ if not(args.force):
 mjd1 = lastMJD - historyLength
 mjd2 = lastMJD
 
-GETDATA = True # TEMPORARY
 
 # Get the data
 
 dmjd = []
 dutck = []
 
-if GETDATA: # TEMPORARY
-	Debug('Fetching data for interval {:d} {:d}'.format(mjd1,mjd2))
-	
-	# Have we already got the data ?
-	# Check the file lastUTCrDownload
-	if (os.path.exists(os.path.join(controlDir,lastUTCrFile))):
-		fin = open(os.path.join(controlDir,lastUTCrFile),'r')
-		lastUTCr = -1 # flags failure to get this
-		for l in fin:
-			if re.match(r'^#',l): # ignore comments
-				continue
-			matches = re.match(r'MJD\s+(\d{5})',l)
-			if matches:
-				lastUTCr = int(matches.group(1))
-				Debug('Last UTCr {:d}'.format(lastUTCr))
-				break
-		fin.close()
-		
-		# We have already checked the run window (unless --force is in effect)
-		if (lastUTCr == lastMJD):
-			Debug('Nothing to do')
-			sys.exit(0)
-	else:
-		Debug('No UTCr download record was found .. downloading')
-		
-	httpreq = '{}/get-data.html?scale=utcr&lab={}&outfile=txt&mjd1={:d}&mjd2={:d}'.format(bipmurl,UTCID,mjd1,mjd2)
-	try:
-		resp = requests.get(httpreq)
-	except:
-		sys.exit(1)
+ottp.Debug('Fetching data for interval {:d} {:d}'.format(mjd1,mjd2))
 
-	# Parse what we got back
-
-	lines = resp.text.split('\r\n')
-	for l in lines:
-		if re.match('#',l): # ignore comments
-			continue
-		ldata = l.split()
-		if len(ldata) == 3: # v0.2 had two fields, v1.0 has three 
-			try:
-				dmjd.append(int(ldata[0]))
-				dutck.append(float(ldata[1]))
-			except:
-				Debug('Bad data: ' + l)
-
-	Debug('UTCr data: first = {:d}, last = {:d}'.format(dmjd[0],dmjd[-1]))
-
-	#Check that we got what we asked for
-	if not(mjd1 == dmjd[0] and mjd2 == dmjd[-1]):
-		Debug('Bad data')
-		sys.exit(0)
-		
-	# Save the data for post-mortems
-	futcr = os.path.join(tmpDir,'utcr.{:d}.dat'.format(lastMJD))
-	fout = open(futcr,'w')
-	fout.write(resp.text)
-	fout.close()
-	Debug('Debug saved data as ' + futcr)
-	
-	# At this point, we can update
-	fout = open(os.path.join(controlDir,lastUTCrFile),'w')
-	fout.write('# MJD {:d} {:02d}:{:02d}:{:02d}\n'.format(mjdToday,dt.hour,dt.minute,dt.second))
-	fout.write('MJD {:d}\n'.format(lastMJD))
-	fout.close()
-	
-else: # TEMPORARY
-	futcr = os.path.join(tmpDir,'utcr.{:d}.dat'.format(lastMJD))
-	fin = open(futcr,'r')
+# Have we already got the data ?
+# Check the file lastUTCrDownload
+if (os.path.exists(os.path.join(controlDir,lastUTCrFile))):
+	fin = open(os.path.join(controlDir,lastUTCrFile),'r')
+	lastUTCr = -1 # flags failure to get this
 	for l in fin:
-		if re.match('\s*#',l): # ignore comments
+		if re.match(r'^#',l): # ignore comments
 			continue
-		ldata = l.split()
-		if len(ldata) == 3: # v0.2 had two fields, v1.0 has three 
-			try:
-				dmjd.append(int(ldata[0]))
-				dutck.append(float(ldata[1]))
-			except:
-				Log(logFile,'Bad data: ' + l)
+		matches = re.match(r'MJD\s+(\d{5})',l)
+		if matches:
+			lastUTCr = int(matches.group(1))
+			ottp.Debug('Last UTCr {:d}'.format(lastUTCr))
+			break
 	fin.close()
+	
+	# We have already checked the run window
+	if (lastUTCr == lastMJD):
+		ottp.Debug('Nothing to do')
+		sys.exit(0)
+else:
+	ottp.Debug('No UTCr download record was found .. downloading')
+	
+httpreq = '{}/get-data.html?scale=utcr&lab={}&outfile=txt&mjd1={:d}&mjd2={:d}'.format(bipmurl,UTCID,mjd1,mjd2)
+try:
+	resp = requests.get(httpreq)
+except:
+	sys.exit(1)
 
-Debug('UTCr data: first = {:d}, last = {:d}'.format(dmjd[0],dmjd[-1]))
+# Parse what we got back
+lines = resp.text.split('\r\n')
+for l in lines:
+	if re.match('#',l): # ignore comments
+		continue
+	ldata = l.split()
+	if len(ldata) == 3: # v0.2 had two fields, v1.0 has three 
+		try:
+			dmjd.append(int(ldata[0]))
+			dutck.append(float(ldata[1]))
+		except:
+			ottp.Debug('Bad data: ' + l)
+
+ottp.Debug('UTCr data: first = {:d}, last = {:d}'.format(dmjd[0],dmjd[-1]))
+
+#Check that we got what we asked for
+if not(mjd1 == dmjd[0] and mjd2 == dmjd[-1]):
+	ottp.Debug('Bad data')
+	sys.exit(0)
+	
+# Save the data for post-mortems
+futcr = os.path.join(tmpDir,'utcr.{:d}.dat'.format(lastMJD))
+fout = open(futcr,'w')
+fout.write(resp.text)
+fout.close()
+ottp.Debug('Debug saved data as ' + futcr)
+
+# At this point, we can update
+fout = open(os.path.join(controlDir,lastUTCrFile),'w')
+fout.write('# MJD {:d} {:02d}:{:02d}:{:02d}\n'.format(mjdToday,dt.hour,dt.minute,dt.second))
+fout.write('MJD {:d}\n'.format(lastMJD))
+fout.close()
+	
+ottp.Debug('UTCr data: first = {:d}, last = {:d}'.format(dmjd[0],dmjd[-1]))
 
 # Since we want do mucho maths, change to numpy arrays
 mjd = np.array(dmjd)
@@ -337,17 +303,45 @@ enableSteer = False # default is to NOT steer
 if (os.path.exists(os.path.join(controlDir,enableSteerFile))):
 	enableSteer = True
 else:
-	Debug('No steering file so NO STEER')
+	ottp.Debug('No steering file so NO STEER')
 	steerMsgs = 'No steering file so NO STEER' # file MUST exist
-
 
 # TODO Check if there is an unprocessed steer
 
-# This is temporary code for testing
-UTCr_PHYCLK = np.array(utck) # Currently, UTCr reports our physical clock Cs2269
-UTCr_HROG   = np.array(utck) # Initialise it
-FudgeData(mjd,UTCr_HROG) # and then correct it: UTCr_HROG = UTCr - (HROG-PHYCLK), where latter term comesfrom logger 
+UTCr_HROG   = np.array(utck) # UTCr reports the UTCr - HROG
+UTCr_PHYCLK = np.array(utck) # We want to compute UTCr - PHYCLK - this will be used to compute the frequency offset of the PHYCLK. Initialize with UTCk  
 
+# UTCr - PHYCLK = (UTCr - HROG) + (HROG - PHYCLK), where the latter term comes from the logger data for the PHYCLK
+
+phyclkPath =os.path.join(clockDataDir,PHYCLK)
+i = 0
+for m in mjd:
+	fname = '{}/{:d}.{}'.format(phyclkPath,m,PHYCLK)
+	if (os.path.exists(fname)):
+		fin = open(fname,'r') # open PHYCLK data file
+		ccnt = 0
+		refdly = 0
+		clkdly = 0
+		for l in fin:
+			if re.match('#',l):
+				ccnt = ccnt + 1
+				if ccnt == 2:
+					fields = l.split()
+					refdly = float(fields[4])
+				if ccnt == 3:
+					fields = l.split()
+					clkdly = float(fields[4])
+				continue
+			[tod,rdg] = l.split() # use the first reading in the file
+			ottp.Debug('{:d} {} {}'.format(m,tod,rdg))
+			UTCr_PHYCLK[i] = UTCr_HROG[i] + float(rdg) + refdly - clkdly
+			ottp.Debug('{:d} {} {} ({},{})-> {:g}'.format(m,tod,rdg,refdly,clkdly,UTCr_PHYCLK[i]))
+			break
+		fin.close()
+	else:
+		ottp.Debug('Unable to open ' + fname)
+	i += 1
+	
 if enableSteer or forceSteer:
 	if enableSteer:
 		Log(logFile,'Steering is ON')
@@ -371,25 +365,27 @@ if enableSteer or forceSteer:
 			npts = iStopMJD  - i
 			break
 
-	Debug('Fit: start = {:d}, stop = {:d}, npts = {:d}'.format(startMJD,stopMJD,npts))
+	ottp.Debug('Fit: start = {:d}, stop = {:d}, npts = {:d}'.format(startMJD,stopMJD,npts))
 
 	# Load the data masking file
 	# This is just a list of MJDs
 	mask = []
 	fmask = os.path.join(controlDir,'mask.dat')
 	if (os.path.exists(fmask)):
-		Debug('Loading ' + fmask)
+		ottp.Debug('Loading ' + fmask)
 		fin = open(fmask,'r')
+		utcdelay = 0
+		clkdelay = 0
 		for l in fin:
 			if re.match('\s*#',l): # ignore comments
 				continue
 			matches = re.match(r'\s*(\d{5})\s*(\d{5})',l)
 			if matches:
-				Debug('Adding {} - {} to data mask'.format(matches.group(1),matches.group(2)))
+				ottp.Debug('Adding {} - {} to data mask'.format(matches.group(1),matches.group(2)))
 				m1 = int(matches.group(1))
 				m2 = int(matches.group(2))
 				if (m1 > m2): # don't try to fix it - most likely it is a typo
-					Debug('Bad mask: {:d} {:d}'.format(m1,m2)) 
+					ottp.Debug('Bad mask: {:d} {:d}'.format(m1,m2)) 
 				else:
 					mask.append([m1,m2])
 		fin.close
@@ -400,11 +396,11 @@ if enableSteer or forceSteer:
 
 	# Steering algorithm, based on Chadsey et al 
 	# A steer is constructed from two frequency adjustments
-	# (1) Estimate the mean ffe using the last 7 days of UTCr datand use this to zero the mean ffe
+	# (1) Estimate the mean ffe using the last 7 days of UTCr data and use this to zero the mean ffe
 	# (2) Get the current (last day in UTCr) phase offset and apply a frequency offset to zero it over the next 7 days
 	# The total steer is the weighted sum of the two
 	
-	# Estimate the TOTAL frequency offset to be applied to make the frequency offset == 0
+	# Estimate the TOTAL (ie not relative to the current steer) frequency offset to be applied to make the frequency offset == 0
 	# This comes from UTCr_PHYCLK
 	
 	# If there are insufficient points for a fit then do not proceed
@@ -425,19 +421,19 @@ if enableSteer or forceSteer:
 			if (mjd[im] >= r[0] and mjd[im] <= r[1]):
 				masked = True
 				nMasked += 1
-				Debug('Masking {:d}'.format(mjd[im]))
+				ottp.Debug('Masking {:d}'.format(mjd[im]))
 		if not(masked): # so that we only add once per MJD
 			mjdFit.append(mjd[im])
 			freqFit.append(UTCr_PHYCLK[im])
 			
-	Debug('Masked {:d} point(s)'.format(nMasked))
+	ottp.Debug('Masked {:d} point(s)'.format(nMasked))
 	
 	coeff = np.polyfit( mjdFit - mjdFit[0],freqFit - freqFit[0],1) # units are ns/day
 	meanfOffset = -coeff[0] # note the sign! Units are ns/day (the applied frequency steer will have opposite sign)
 	freqStep = -meanfOffset
 	
-	Debug('Est. mean frequency offset: {:g} ns/day'.format(meanfOffset))
-	Debug('->required frequency step:  {:g} ns/day'.format(freqStep))
+	ottp.Debug('Est. mean frequency offset: {:g} ns/day'.format(meanfOffset))
+	ottp.Debug('->required frequency step:  {:g} ns/day'.format(freqStep))
 
 	if abs(freqStep) > maxClockFOffset:
 		scheduleSteer = False
@@ -447,13 +443,13 @@ if enableSteer or forceSteer:
 
 	# Calculate the slew rate required to zero the offset
 	currPhaseOffset = UTCr_HROG[-1];
-	Debug('Current phase offset = {:g} ns'.format(currPhaseOffset))
+	ottp.Debug('Current phase offset = {:g} ns'.format(currPhaseOffset))
 	phaseSlew = currPhaseOffset/7;
-	Debug('Est. phase offset slew: {:g} ns/day)'.format(phaseSlew))
+	ottp.Debug('Est. phase offset slew: {:g} ns/day)'.format(phaseSlew))
 
 	if abs(phaseSlew) > maxPhaseSlew:
-		scheduleSteer = False
-		msg = 'Required phase slew exceeds limit (> {:g} ns/day)'.format(maxPhaseSlew)
+		phaseSlew = np.sign(phaseSlew)* maxPhaseSlew
+		msg = 'Required phase slew exceeds limit (> {:g} ns/day) - clamped to {}'.format(maxPhaseSlew,phaseSlew)
 		steerMsgs += msg + '<br>'
 		Log(logFile,msg)
 	
@@ -659,7 +655,7 @@ if email:
 	s.quit()
 
 # cleanup temporary files
-if not(debug):
+if not(args.debug):
 	os.unlink(plotfile1)
 	os.unlink(plotfile2)
 	os.unlink(plotfile3)
