@@ -1,0 +1,17 @@
+MAILTO=Michael.Wouters@measurement.gov.au
+USER=utcsteer
+HTTPS_PROXY=http://lfproxy.in.measurement.gov.au:8080/
+HTTP_PROXY=http://lfproxy.in.measurement.gov.au:8080/
+http_proxy=http://lfproxy.in.measurement.gov.au:8080/
+https_proxy=http://lfproxy.in.measurement.gov.au:8080/
+
+# * * * * * /home/utcsteer/bin/utcsteersched.py
+# Don't try until it's probably available
+7 7-23 * * Wed  /home/utcsteer/bin/utcsteersched.py
+# Try for the next day as well (until UTC0 on Fri)
+7 0-23 * * Thu /home/utcsteer/bin/utcsteersched.py 
+
+# Start trying to do the steer after UTC0300 on Thursday ie 1 to 2 pm local time
+# Only one try to begin with
+7 3    * * Thu /home/utcsteer/bin/utcsteer.py
+
