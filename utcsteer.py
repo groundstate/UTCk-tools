@@ -50,7 +50,7 @@ sys.path.append("/usr/local/lib/python3.10/site-packages") # Ubuntu 22.04
 
 import ottplib
 
-VERSION = "0.0.6"
+VERSION = "0.0.7"
 AUTHORS = "Michael Wouters"
 
 BaudRates = [9600,14400,19200,28800,38400,57600,115200]
@@ -148,7 +148,7 @@ def GetHROGSettings(serport):
 appName = os.path.basename(sys.argv[0])
 debug = False
 email = True
-recipients = 'Michael.Wouters@measurement.gov.au'
+recipients = 'time@measurement.gov.au'
 UTCID = 'AUS'
 
 # Limits on the applied frequency step
@@ -164,7 +164,7 @@ home =os.environ['HOME'] + '/'
 user =os.environ['USER'] # remember to define this in the user's crontab
 configFile = os.path.join(home,'etc/utcsteer.conf')
 ussConfigFile = os.path.join(home,'etc/utcsteersched.conf')
-logDir = os.path.join(home,'logs')
+logDir = os.path.join(home,'log')
 controlDir = os.path.join(home,'control')
 scheduledDir = os.path.join(controlDir,'scheduled_steer')
 processedDir = os.path.join(controlDir,'processed_steer')

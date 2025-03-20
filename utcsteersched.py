@@ -140,7 +140,7 @@ scheduledDir = os.path.join(controlDir,'scheduled_steer')
 processedDir = os.path.join(controlDir,'processed_steers')
 historyLength = 90 # in days
 tmpDir = os.path.join(home,'tmp')
-recipients = 'Michael.Wouters@measurement.gov.au'
+recipients = 'time@measurement.gov.au'
 email = True
 bipmurl = 'https://webtai.bipm.org/api/v1.0'
 
