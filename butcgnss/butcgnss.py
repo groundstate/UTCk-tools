@@ -122,7 +122,12 @@ def GetTimeSysCorr(gnss,navFile):
 				
 	fnav.close()
 
-
+# -------------------------------------------
+# TDEV for Cs  5071
+# 
+def TDEV_5071_Std(tauDays):
+	return 2.0*math.sqrt(tauDays) # in ns 
+	
 #----------------------------------------------
 def CheckConfig(cfg,req):
 	ok = True
@@ -203,6 +208,23 @@ def formatNumber(fval):
 	return str(round(fval*10)/10.0) # in 0.1 ns note that this is banker's rounding
 	
 
+#import requests
+#r = requests.get("https://webtai.bipm.org/api/v1.0/get-data.html?scale=utc&lab=AOS")
+
+# ---------------------------------------------
+def GetCircularT(lab,strMJD,stopMJD):
+	# Temporary code
+	ret = {}
+	fin = open(os.path.join(root,'report/cirt.txt'),'r')
+	for l in fin:
+		if l[0] == '#':
+			continue
+		vals = l.strip().split()
+		if (len(vals) == 3):
+			ret[int(vals[0])] = [float(vals[1]),float(vals[2])]
+	fin.close()
+	return ret
+	
 # ---------------------------------------------
 # Main 
 # ---------------------------------------------
@@ -215,6 +237,7 @@ rnxDir = os.path.join(root,'rinex')
 tmpDir  = os.path.join(root,'tmp')
 reportDir = os.path.join(root,'reports')
 cggttsDir = os.path.join(root,'cggtts')
+notes = os.path.join(root,'etc/butcgnss_notes.txt')
 
 winSize = REFSYS_AVG_WINDOW
 
@@ -255,6 +278,9 @@ if 'main:root' in cfg:
 if 'main:report path' in cfg:
 	reportDir = ottp.MakeAbsolutePath(cfg['main:report path'],root)
 	
+if 'main:notes' in cfg:
+	notes = ottp.MakeAbsoluteFilePath(cfg['main:notes'],root,notes)
+	
 if 'rinex:path' in cfg:
 	rnxDir = ottp.MakeAbsolutePath(cfg['rinex:path'],root)
 	# check other necessary things have been defined
@@ -269,7 +295,7 @@ stopMJD = ottp.MJD(ts)
 dt = datetime.fromtimestamp(ts, tz=timezone.utc) # get date in UTC
 ts   = ts - 86400*(dt.day-1) # FIXME check month rollover
 startMJD = ottp.MJD(ts)-1 # need to get the previous day 
-auto = True # i
+monthlyReport = True 
 ottp.Debug(f'Default processing range {startMJD} - {stopMJD}')
 
 if (args.mjd):
@@ -283,17 +309,20 @@ if (args.mjd):
 			ottp.ErrorExit('Stop MJD is before start MJD')
 	else:
 		ottp.ErrorExit('Too many MJDs')
-	auto = False # if we manually specify a range then the existing data are overwritten
+	monthlyReport = False # if we manually specify a range this is not the usual monthly report
 
 
+# Do we need to download 
 # First pass - update UTC(k) - bUTC_GNSS
 freport = None # initially, the report file is closed or doesn't yet exist
 prevCGGTTSFile = {}
 prevCGGTTSFile['GPS'] = CGGTTS(None,None)
-
+newData = {}
 for mjd in range(startMJD,stopMJD + 1):
 	
-	reportData = {}
+	# If this is not the monthly report
+	
+	reportData = {} # all GNSS, for this MJD
 	
 	ts = (mjd - 40587)*86400 # convert MJD to UNIX time
 	dt = datetime.fromtimestamp(ts, tz=timezone.utc) # get date in UTC
@@ -304,25 +333,15 @@ for mjd in range(startMJD,stopMJD + 1):
 	gpsWn,gpsDn = ottp.MJDtoGPSWeekDay(mjd)
 	ottp.Debug(f'\nProcessing {mjd}: {yyyy}-{mm}-{dd}, WN={gpsWn} DN={gpsDn}')
 	
-	# Is the required monthly report open?
-	if freport == None:
-		# First, does it exist ?
-		reportName = os.path.join(reportDir,f'brutc{mm:02d}{yyyy:4d}.txt')
-		if (not os.path.isfile(reportName)):
-			ottp.Debug(f'Creating new report {reportName}')
-			freport = open(reportName,'w')
-		else:
-			pass
-	
 	for g in gnss:
 		ottp.Debug(f'Processing {g}')
 		reportData[g] = [None,None,None,None] # Fields are UTC(k)-bUTC_GNSS, u, UTC - bUTC_GNSS, u]
 		
-		fname = FindCGTTSFile(g,mjd)
+		fName = FindCGTTSFile(g,mjd)
 		
-		if fname:
-			ottp.Debug(f'Reading {fname}')
-			cgf = CGGTTS(fname,mjd)
+		if fName:
+			ottp.Debug(f'Reading {fName}')
+			cgf = CGGTTS(fName,mjd)
 			cgf.Read()
 		else:
 			ottp.Debug('No CGGTTS file found')
@@ -336,7 +355,7 @@ for mjd in range(startMJD,stopMJD + 1):
 		# Calculate the average REFSYS, if we can
 		if prevCGGTTSFile[g].fileName or cgf.fileName:
 			refsys0,uRefsys0,nTracks = GetRefsys(prevCGGTTSFile[g],cgf,winSize);
-			print(refsys0,uRefsys0,nTracks)
+			#print(refsys0,uRefsys0,nTracks)
 		
 			if not (refsys0 == None):
 				# Find the navigation file
@@ -366,14 +385,119 @@ for mjd in range(startMJD,stopMJD + 1):
 			ottp.Debug('Insufficent CGGTTS data')
 	
 		prevCGGTTSFile[g] = cgf # save it for the next time
-		
+	
+	if (mjd == startMJD):
+		continue
+	
 	# If we can't generate the data, mark as missing'
-	outputLine = f'{mjd:5d}'
+	outputLine = f'{yyyy:4d}-{mm:02d}-{dd:02d} {mjd:5d}'
 	missingData = '*'
 	for g in gnss:
 		if reportData[g][0]==None:
-			outputLine += f'{missingData:^9}{missingData:^9}'
+			outputLine += f'{missingData:>9}{missingData:>5}{missingData:>9}{missingData:>5}'
 		else:
-			outputLine += '{:>9}{:>9}'.format(formatNumber(reportData[g][0]),formatNumber(reportData[g][1]))
-	print(outputLine)
-# Second pass - update UTC - bUTC_GNSS
+			outputLine += '{:>9}{:>5}{:>9}{:>5}'.format(formatNumber(reportData[g][0]),formatNumber(reportData[g][1]),missingData,missingData)
+	newData[mjd] = outputLine + '\n'
+	
+	
+# All done - the monthly report can now be written
+# It is rewritten each time the software is run
+if monthlyReport:
+	reportName = os.path.join(reportDir,f'brutc{mm:02d}{yyyy:4d}.txt')
+	ottp.Debug(f'Creating new report {reportName}')
+	fout = open(reportName,'w')
+	for k in newData:
+		fout.write(newData[k])
+	
+	if (os.path.isfile(notes)):
+		with open(notes, 'r') as fin:
+			txt = fin.read()
+			fout.write(txt)
+	else:
+		ottp.Debug('Unable to open {notes}')
+	fout.close()		
+	
+# Second pass - update UTC - bUTC_GNSS for the previous month if necessary,
+# but only if we are running in automatic mode
+
+if monthlyReport:
+	mjd = stopMJD
+	ts = (mjd - 40587)*86400 # convert MJD to UNIX time
+	dt = datetime.fromtimestamp(ts, tz=timezone.utc) # get date in UTC
+	yyyy = dt.year
+	mm   = dt.month
+	dd   = dt.day
+	if (dd < 12): # won't be available yet
+		ottp.Debug('Too early for Circular T')
+		sys.exit(0) # we're done
+	if (mm == 1):
+		mm = 12
+		yyyy -= 1
+	else:
+		mm -= 1
+	reportName = os.path.join(reportDir,f'brutc{mm:02d}{yyyy:4d}.txt')
+	ottp.Debug(f'Read report {reportName}')
+	if (os.path.isfile(reportName)):
+		with open(reportName, 'r') as fin:
+			rep = fin.read()
+		# First, check whether UTC - bUTC_gnss has been computed
+		# This is indicated by text at the end of the report
+		if 'UTC - bUTC_GNSS updated' in rep:
+			ottp.Debug('Report already updated using Circular T')
+			sys.exit(0)
+		
+		cirt = GetCircularT('AUS',0,0) # TODO
+		if not cirt:
+			ottp.Debug("Couldn't get Circular T")
+			sys.exit(0)
+		# Check that the required MJDs are there
+		# TO DO
+		
+		rep = rep.split('\n') # want to process line by line
+		
+		newRep = ''
+		for i in range(0,len(rep)):
+			l = rep[i]
+			m = re.match(r'\d{4}-\d{2}-\d{2} (\d{5})',l)
+			if m:
+				mjd        = int(l[11:16])
+				mjdLastDigit = int(l[15])
+				utckDiff   = l[16:25]
+				utckUncert = l[25:30]
+				if '*' in utckDiff:
+					ottp.Debug(f'no data for {mjd}')
+					newRep += l + '\n'
+					continue
+				utckDiff = float(utckDiff)
+				utckUncert = float(utckUncert )
+				if mjdLastDigit == 4 or mjdLastDigit == 9:
+					utcDiff = formatNumber(cirt[mjd][0] - utckDiff)
+					utcUncert = formatNumber(math.sqrt(cirt[mjd][1]*cirt[mjd][1] +  utckUncert*utckUncert))
+					
+				else: # must interpolate
+					
+					if mjdLastDigit < 4:
+						mjd0 = mjd - mjdLastDigit - 1
+						mjd1 = mjd - mjdLastDigit + 4
+					else:
+						mjd0 = mjd - mjdLastDigit + 4
+						mjd1 = mjd - mjdLastDigit + 9
+					
+					utc0 = cirt[mjd0][0]
+					utc1 = cirt[mjd1][0]
+					
+					dmjd = mjd - mjd0
+					utcDiff = formatNumber(utc0 + dmjd*(utc1-utc0)/5)
+					interpUncert2 = (cirt[mjd0][1]*(1-dmjd/5))**2 + (cirt[mjd1][1]*dmjd/5)**2
+					print(math.sqrt(interpUncert2))
+					utcUncert = formatNumber(math.sqrt( utckUncert*utckUncert+ interpUncert2))
+					
+				newRep += l[0:16] + l[16:30]+f'{utcDiff:>9}{utcUncert:>5}'+'\n'
+			else:
+				newRep += l + '\n'
+		print(newRep)
+	else:
+		ottp.Debug(f"Can't find {reportName}")
+	
+	
+	
