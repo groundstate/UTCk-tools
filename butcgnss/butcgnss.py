@@ -31,6 +31,7 @@ from datetime import timezone
 import math 
 import os
 import re
+import requests
 import shutil
 import sys
 import time
@@ -56,7 +57,7 @@ try:
 except ImportError:
 	sys.exit('ERROR: Must install rinexlib\n eg openttp/software/system/installsys.py -i rinexlib')
 	
-VERSION = '0.0.3'
+VERSION = '0.0.4'
 AUTHORS = 'Michael Wouters'
 
 REFSYS_AVG_WINDOW = 2 # window size for averaging
@@ -69,6 +70,46 @@ def ShowVersion():
 	print (os.path.basename(sys.argv[0])+" "+VERSION)
 	print ('Written by ' + AUTHORS)
 	return
+
+#----------------------------------------------
+def CheckConfig(cfg,req):
+	ok = True
+	for r in req:
+		if not(r in cfg):
+			print(f'{r} is not set')
+			ok = False
+	return ok
+
+# ---------------------------------------------
+def WriteHeader(fout):
+	# Date column is 10x
+	# MJD  column is 5x
+	# Each GNSS column is 9+5+9+5 = 28 x
+	hdr1 = hdr2 =  hdr4 = ' '*16 
+	hdr3 = ' '*11 
+	for g in gnss:
+		hdr1 += f'{g:^26}'
+		
+		hdr3 += '{:<5}{:>9}{:>5}{:>9}{:>5}'.format('MJD','UTC('+lab+')','u','UTC','u')
+		hdr4 += '{:>9}{:>14}'.format('- bUTC','- bUTC')
+	fout.write(hdr1+'\n')
+	fout.write(hdr3+'\n')
+	fout.write(hdr4+'\n')
+	
+	hdr = '-'* (16 + len(gnss)*28) 
+	fout.write(hdr+'\n')
+	
+	
+	
+# ---------------------------------------------
+def WriteFooter(fout,footer):
+	if (os.path.isfile(footer)):
+		with open(footer, 'r') as fin:
+			txt = fin.read()
+			fout.write('\n\n')
+			fout.write(txt)
+	else:
+		ottp.Debug('Unable to open {footer}')
 
 # ------------------------------------------
 def FindCGTTSFile(gnss,mjd):
@@ -120,21 +161,6 @@ def GetTimeSysCorr(gnss,navFile):
 			# TODO earlier RINEX 
 				
 	fnav.close()
-
-# -------------------------------------------
-# TDEV for Cs  5071
-# 
-def TDEV_5071_Std(tauDays):
-	return 2.0*math.sqrt(tauDays) # in ns 
-	
-#----------------------------------------------
-def CheckConfig(cfg,req):
-	ok = True
-	for r in req:
-		if not(r in cfg):
-			print(f'{r} is not set')
-			ok = False
-	return ok
 
 # ---------------------------------------------
 def GetRefsys(cgBef,cgAft,winSize):
@@ -202,20 +228,18 @@ def GetRefsys(cgBef,cgAft,winSize):
 	
 	return refsys0,math.sqrt(urefsys0/(nTracks-1)),nTracks
 
-# ---------------------------------------------
-def formatNumber(fval,res=0.1):
-	invres = 1/res
-	return str(round(fval*invres)/invres) # note that this is banker's rounding
 	
 # ---------------------------------------------
 
 #import requests
 #r = requests.get("https://webtai.bipm.org/api/v1.0/get-data.html?scale=utc&lab=AOS")
 
+
+# Returns Circular T in a list
 # ---------------------------------------------
-def GetCircularT(lab,startMJD,stopMJD):
+def __GetCircularT(lab,startMJD,stopMJD):
 	# Temporary code
-	data = {}
+	data = []
 	fin = open(os.path.join(root,'report/cirt.txt'),'r')
 	firstMJD = lastMJD = None
 	for l in fin:
@@ -223,26 +247,42 @@ def GetCircularT(lab,startMJD,stopMJD):
 			continue
 		vals = l.strip().split()
 		if (len(vals) == 3):
-			data[int(vals[0])] = [float(vals[1]),float(vals[2])]
+			data.append([int(vals[0]),float(vals[1]),float(vals[2])])
 			if not firstMJD:
 				firstMJD = int(vals[0])
 			lastMJD = int(vals[0])
 	fin.close()
 	return data,firstMJD,lastMJD
-	
-# ---------------------------------------------
-def WriteHeader(fout):
-	fout.write('MJD\n')
 
 # ---------------------------------------------
-def WriteFooter(fout,footer):
-	if (os.path.isfile(footer)):
-		with open(footer, 'r') as fin:
-			txt = fin.read()
-			fout.write('\n\n')
-			fout.write(txt)
-	else:
-		ottp.Debug('Unable to open {footer}')
+def GetCircularT(lab,startMJD,stopMJD):
+	
+	r = requests.get(f'{httpRequest}scale=utc&lab={lab}&mjd1={startMJD}&mjd2={stopMJD}&outfile=txt')
+	lines = r.text.split('\r\n')
+	data = []
+	firstMJD = lastMJD = None
+	for l in lines:
+		l = l.strip()
+		if not(l):
+			continue
+		if l[0] == '#':
+			continue
+		vals = l.strip().split()
+		if (len(vals) == 3):
+			data.append([int(vals[0]),float(vals[1]),float(vals[2])])
+			if not firstMJD:
+				firstMJD = int(vals[0])
+			lastMJD = int(vals[0])
+	return data,firstMJD,lastMJD
+	
+# ---------------------------------------------
+def GetNearestU(cirt,mjd):
+	for i in range(0,len(cirt)-1):
+		if (cirt[i][0] >= mjd and mjd <= cirt[i+1][0]):
+			ottp.Debug(f'{cirt[i][0]} {cirt[i+1][0]} {mjd} {cirt[i][2]} ')
+			return cirt[i][2]
+	ottp.Debug(f'{cirt[-1][0]} {mjd} failed -> {cirt[i][2]} ')
+	return cirt[-1][2]
 
 # ---------------------------------------------
 # Linear interpolation  of Circular T
@@ -252,6 +292,12 @@ def InterpolateUTC(mjd,mjd0,mjd1,cirt):
 	utc1 = cirt[mjd1][0]	
 	dmjd = mjd - mjd0
 	return utc0 + dmjd*(utc1-utc0)/5,math.sqrt((cirt[mjd0][1]*(1-dmjd/5))**2 + (cirt[mjd1][1]*dmjd/5)**2)
+	
+# -------------------------------------------
+# TDEV for Cs 5071
+# 
+def TDEV_5071_Std(tauDays):
+	return 2.0*math.sqrt(tauDays) # in ns 
 	
 # ---------------------------------------------
 # Main 
@@ -266,6 +312,8 @@ tmpDir  = os.path.join(root,'tmp')
 reportDir = os.path.join(root,'reports')
 cggttsDir = os.path.join(root,'cggtts')
 footer = os.path.join(root,'etc/butcgnss_footer.txt')
+lab = 'AUS'
+httpRequest = 'https://webtai.bipm.org/api/v1.0/get-data.html?'
 
 winSize = REFSYS_AVG_WINDOW
 
@@ -306,6 +354,9 @@ gnss = cfg['main:gnss'].split(',')
 if 'main:root' in cfg:
 	root = cfg['main:root']
 
+if 'main:lab' in cfg:
+	lab = cfg['main:lab']
+	
 if 'main:report path' in cfg:
 	reportDir = ottp.MakeAbsolutePath(cfg['main:report path'],root)
 	
@@ -358,10 +409,14 @@ if args.utc:
 	startMJD -= 1
 	# TESTED January and February 
 	# Check if Circular T is available 
-	cirt,firstMJD,lastMJD = GetCircularT('AUS',startMJD - 7,stopMJD + 7) 
-	if not cirt:
+	cirtAsList,firstMJD,lastMJD = GetCircularT('AUS',startMJD - 7,stopMJD + 7) 
+	if not cirtAsList:
 		sys.exit("Couldn't get Circular T")
-
+	# In UTC update mode it's convenient to have Circular T as a dictionary
+	cirt = {}
+	for c in cirtAsList:
+		cirt[c[0]] = [c[1],c[2]]
+	
 	# Check that the required MJDs are there
 	if not(firstMJD <= startMJD and stopMJD - 5  <= lastMJD ): # probably won't get the last day of the month
 		sys.exit(f"Not all required MJDs are available in Circular T (wanted [{startMJD},{stopMJD} - 5], got [{firstMJD},{lastMJD}])")
@@ -373,10 +428,11 @@ else:
 	# Set the default processing range
 	stopMJD = ottp.MJD(ts)  
 	
-	# Now need to get
+
 	dt = datetime.fromtimestamp(ts, tz=timezone.utc) # get date in UTC
 	ts   = ts - 86400*(dt.day-1) # FIXME check month rollover
 	startMJD = ottp.MJD(ts)-1 # need to get the previous day as well
+	mjdToday = startMJD + 1
 	
 	dailyUpdate = True 
 	ottp.Debug(f'Default processing range {startMJD} - {stopMJD}')
@@ -394,15 +450,42 @@ else:
 			ottp.ErrorExit('Too many MJDs')
 		dailyUpdate = False
 
+	# Need to get Circular T so that we know the current uncertainty uB
+	# Unfortunately the Web API returns the total uncertainty.
+	# In most cases, and for us, uB dominates so for the moment
+	# we'll use the total uncertainty for uB. Typically, we won't have a matching uB
+	# for an MJD, so we'll just be using the most recent anyway (noting that this will be fixed
+	# later when the UTC update is done)
 
+	# Initial guess on range of Circular T to ask for is
+	# [startMJD -7, stopMJD + 7] say
+	
+	cirtStartMJD = startMJD - 7
+	cirtStopMJD  = stopMJD  + 7
+	
+	# The most recent value could be 6 or 7 weeks ago (two weeks into month, previous month not yet available)
+	# It doesn't hurt to get a bit more data than we need so assume the most recent value is 50 days old.
+	
+	if (mjdToday - 50 < cirtStartMJD):
+		cirtStartMJD = mjdToday - 50
+
+	cirtAsList,firstMJD,lastMJD = GetCircularT('AUS',cirtStartMJD,cirtStopMJD)
+	if not cirtAsList:
+		sys.exit("Couldn't get Circular T")
+	
+	# Range checking is fraught
+	
+	
 currReport = None # initially, the report file is closed or doesn't yet exist
-mjdLastUTCupdate = None # for tracking if we updated UTC - buTC_GNSS for the whople month
+mjdLastUTCupdate = None # for tracking if we updated UTC - buTC_GNSS for the whole month
 prevCGGTTSFile = {}
 prevCGGTTSFile['GPS'] = CGGTTS(None,None)
 newData = {}
 
-for mjd in range(startMJD,stopMJD + 1):
-	
+mjd = startMJD - 1
+
+while mjd < stopMJD :
+	mjd += 1 # doing this here means not having to increment multiple times
 	reportData = {} # all GNSS, for this MJD
 	
 	ts = (mjd - 40587)*86400 # convert MJD to UNIX time
@@ -421,19 +504,34 @@ for mjd in range(startMJD,stopMJD + 1):
 			currReport.write('\n\n####################################################################\n')
 			currReport.write(f'Generated by {os.path.basename(sys.argv[0])} v{VERSION}\n')
 			if (mjdLastUTCupdate == mjd -1):
-				currReport.write('UTC - bUTC_GNSS updated\n')
+				currReport.write('UTC - bUTC_GNSS updated {}\n'.format(datetime.now(tz=timezone.utc).strftime('%Y-%m-%d')))
 			currReport.write('####################################################################\n')
 			currReport.close()
 			
 		reportName = os.path.join(reportDir,f'brutc{mm:02d}{yyyy:4d}.txt')
+		
+		if UTCupdate:
+			# Check whether the file needs processing
+			if os.path.isfile(reportName):
+				fin = open(reportName,'r')
+				with fin:
+					txt = fin.read()
+				if 'UTC - bUTC_GNSS updated' in txt:
+					ottp.Debug(f'{reportName} is up to date ... skipping')
+					# FIXME need to skip ahead 
+					# Can do this by changing startMJD to the end of the month
+					print(startMJD)
+					startMJD = startMJD + (calendar.monthrange(yyyy,mm)[1] - 1)  + 1
+					mjd = startMJD - 1 # because we will imediately increment it
+					print(mjd)
+					continue
+		
 		ottp.Debug(f'Creating report {reportName}')
 		try:
 			currReport = open(reportName,"w")
 		except:
 			sys.exit(f"Couldn't open {reportName}")
-		if UTCupdate:
-			# Check whether the file needs processing
-			pass
+		
 		WriteHeader(currReport)
 		
 	for g in gnss:
@@ -492,7 +590,8 @@ for mjd in range(startMJD,stopMJD + 1):
 			deltaUTC = tsCorr[0] + tsCorr[1]*(86400*gpsDn + leapSecs - tsCorr[2] + 604800*(gpsWn - tsCorr[3]))
 			#print(deltaUTC,tsCorr,gpsDn,gpsWn,leapSecs)
 			reportData[g][0] = refsys0 + deltaUTC*1.0E9
-			reportData[g][1] = math.sqrt(uRefsys0**2 + 9 + U_GNSS_LINK**2 +  U_BUTC_MODEL**2) # TODO link uncertainty
+			uCircularT = GetNearestU(cirtAsList,mjd)
+			reportData[g][1] = math.sqrt(uRefsys0**2 + uCircularT**2 + U_GNSS_LINK**2 +  U_BUTC_MODEL**2) # TODO link uncertainty
 		if UTCupdate:
 			mjdLastDigit = int(str(mjd)[-1])
 			if mjdLastDigit < 4:
@@ -505,7 +604,7 @@ for mjd in range(startMJD,stopMJD + 1):
 				ottp.Debug(f'{mjd0} and {mjd1} not in CirT')
 				prevCGGTTSFile[g] = cgf
 				continue
-			if not(mjd1 in cirt):
+			if not(mjd1 in cirt): # special case: can't interpolate but can do mjd ==  mjd0
 				ottp.Debug(f'{mjd1} not in CirT')
 				if (mjd == mjd0):
 					reportData[g][2] = cirt[mjd][0] + reportData[g][0]
@@ -530,7 +629,7 @@ for mjd in range(startMJD,stopMJD + 1):
 				UTCkInstability = TDEV_5071_Std(mjd1- mjd)
 			
 			#print(mjd,uRefsys0, utcUncert,UTCkInstability,U_GNSS_LINK,U_BUTC_MODEL)
-			reportData[g][3] = math.sqrt(uRefsys0**2 + utcUncert**2 + UTCkInstability**2+ U_GNSS_LINK**2 +  U_BUTC_MODEL**2) # FIXME
+			reportData[g][3] = math.sqrt(uRefsys0**2 + utcUncert**2 + UTCkInstability**2+ U_GNSS_LINK**2 +  U_BUTC_MODEL**2) 
 			
 			mjdLastUTCupdate = mjd
 		prevCGGTTSFile[g] = cgf # save it for the next time
@@ -548,7 +647,7 @@ for mjd in range(startMJD,stopMJD + 1):
 			reportedUTCkUncert = reportData[g][1]
 			if reportedUTCkUncert  < minUTCkUncertainty:
 				reportedUTCkUncert = minUTCkUncertainty
-			outputLine += '{:>9}{:>5}{:>9}{:>5}'.format(formatNumber(reportData[g][0]),formatNumber(reportedUTCkUncert,1),missingData,missingData)
+			outputLine += '{:>9}{:>5}{:>9}{:>5}'.format(round(reportData[g][0],1),math.ceil(reportedUTCkUncert),missingData,missingData)
 		else:
 			reportedUTCkUncert = reportData[g][1]
 			if reportedUTCkUncert  < minUTCkUncertainty:
@@ -556,7 +655,7 @@ for mjd in range(startMJD,stopMJD + 1):
 			reportedUTCUncert = reportData[g][3]
 			if reportedUTCUncert  < minUTCUncertainty:
 				reportedUTCUncert = minUTCUncertainty
-			outputLine += '{:>9}{:>5}{:>9}{:>5}'.format(formatNumber(reportData[g][0],1),formatNumber(reportedUTCkUncert,1),formatNumber(reportData[g][2]),formatNumber(reportedUTCUncert,1))
+			outputLine += '{:>9}{:>5}{:>9}{:>5}'.format(round(reportData[g][0],1),math.ceil(reportedUTCkUncert),round(reportData[g][2],1),math.ceil(reportedUTCUncert))
 	if (dailyUpdate or UTCupdate):
 		currReport.write(outputLine+'\n')
 	newData[mjd] = outputLine + '\n'
