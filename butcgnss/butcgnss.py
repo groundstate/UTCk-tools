@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/python3
 
 #
 # The MIT License (MIT)
@@ -39,6 +39,7 @@ import time
 # This is where cggttslib is installed
 sys.path.append("/usr/local/lib/python3.8/site-packages")  # Ubuntu 20.04
 sys.path.append("/usr/local/lib/python3.10/site-packages") # Ubuntu 22.04
+sys.path.append("/usr/local/lib/python3.12/site-packages") # Ubuntu 24.04
 
 try: 
 	import cggttslib as cggtts
@@ -57,13 +58,19 @@ try:
 except ImportError:
 	sys.exit('ERROR: Must install rinexlib\n eg openttp/software/system/installsys.py -i rinexlib')
 	
-VERSION = '0.0.4'
+VERSION = '0.0.5'
 AUTHORS = 'Michael Wouters'
 
 REFSYS_AVG_WINDOW = 2 # window size for averaging
 
-U_GNSS_LINK = 2.5     # uncertainty of GNSS provider's link calibration 
-U_BUTC_MODEL = 1      # uncertainty arising from choice of UTC model
+
+# Uncertainty of GNSS provider's link calibration 
+# Values from Defraigne et al 2023 Metrologia 60 065010,  DOI : 10.1088/1681-7575/ad0562
+U_CAL_GNSS = {'BDS': 2.4, 'GAL': 2.4 ,'GLO': 3.8, 'GPS': 2.7}
+
+# Uncertainty arising from choice of UTC model
+# Values from Defraigne et al 2023 Metrologia 60 065010,  DOI : 10.1088/1681-7575/ad0562
+U_NAVMSG_GNSS = {'BDS': 0.2, 'GAL': 0.1 ,'GLO':1.2, 'GPS': 1.3}
 
 # ------------------------------------------
 def ShowVersion():
@@ -228,7 +235,7 @@ def GetRefsys(cgBef,cgAft,winSize):
 
 # Returns Circular T in a list
 # ---------------------------------------------
-def __GetCircularT(lab,startMJD,stopMJD):
+def GetCircularT(lab,startMJD,stopMJD):
 	# Temporary code
 	data = []
 	fin = open(os.path.join(root,'report/cirt.txt'),'r')
@@ -246,7 +253,7 @@ def __GetCircularT(lab,startMJD,stopMJD):
 	return data,firstMJD,lastMJD
 
 # ---------------------------------------------
-def GetCircularT(lab,startMJD,stopMJD):
+def __GetCircularT(lab,startMJD,stopMJD):
 	
 	r = requests.get(f'{httpRequest}scale=utc&lab={lab}&mjd1={startMJD}&mjd2={stopMJD}&outfile=txt')
 	lines = r.text.split('\r\n')
@@ -582,7 +589,7 @@ while mjd < stopMJD :
 			#print(deltaUTC,tsCorr,gpsDn,gpsWn,leapSecs)
 			reportData[g][0] = refsys0 + deltaUTC*1.0E9
 			uCircularT = GetNearestU(cirtAsList,mjd)
-			reportData[g][1] = math.sqrt(uRefsys0**2 + uCircularT**2 + U_GNSS_LINK**2 +  U_BUTC_MODEL**2) # TODO link uncertainty
+			reportData[g][1] = math.sqrt(uRefsys0**2 + uCircularT**2 + U_CAL_GNSS[g]**2 +  U_NAVMSG_GNSS[g]**2) 
 		if UTCupdate:
 			mjdLastDigit = int(str(mjd)[-1])
 			if mjdLastDigit < 4:
@@ -620,7 +627,7 @@ while mjd < stopMJD :
 				UTCkInstability = TDEV_5071_Std(mjd1- mjd)
 			
 			#print(mjd,uRefsys0, utcUncert,UTCkInstability,U_GNSS_LINK,U_BUTC_MODEL)
-			reportData[g][3] = math.sqrt(uRefsys0**2 + utcUncert**2 + UTCkInstability**2+ U_GNSS_LINK**2 +  U_BUTC_MODEL**2) 
+			reportData[g][3] = math.sqrt(uRefsys0**2 + utcUncert**2 + UTCkInstability**2+ U_CAL_GNSS[g]**2 +  U_NAVMSG_GNSS[g]**2) 
 			
 			mjdLastUTCupdate = mjd
 		prevCGGTTSFile[g] = cgf # save it for the next time
