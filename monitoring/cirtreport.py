@@ -54,7 +54,7 @@ sys.path.append("/usr/local/lib/python3.12/site-packages") # Ubuntu 24.04
 
 import ottplib as ottp
 
-VERSION = "1.0.0"
+VERSION = "1.0.1"
 AUTHORS = "Michael Wouters"
 
 # ------------------------------------------
@@ -103,8 +103,11 @@ tt = time.time()
 mjdToday = int(tt/86400)+40587
 dt = datetime.date.today()
 yyyy = dt.year
-mm   = dt.month
-dd   = dt.day 
+mm   = dt.month - 1
+if mm == 0:
+	mm = 12
+	yyyy -= 1
+dt=datetime.date(yyyy,mm,1) # reset the date to previous month
 
 parser = argparse.ArgumentParser(description='Report on UTC(k) from Circular T data',
 	formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -190,6 +193,8 @@ tau = 5*np.arange(1,nd)
 
 #f,(ax1,ax2,ax3)= plt.subplots(3,sharex=False,figsize=(8,11))
 #f.suptitle('UTC - ' + UTClab)
+
+ottp.Debug('Creating plots')
 
 # TIME OFFSET
 
@@ -318,10 +323,15 @@ fout.write(repBody)
 fout.close()
 
 # Create a pdf from html
+ottp.Debug('Creating pdf')
 cmd = '/usr/bin/htmldoc --quiet --webpage -f ' + repPDF + ' ' + repHTML
-os.system(cmd)
+try:
+	os.system(cmd)
+except:
+	ottp.Debug('Failed to create PDF')
 
 if email:
+	ottp.Debug('Sending email')
 	sender = 'time@measurement.gov.au'
 
 	msg = MIMEMultipart('related')
