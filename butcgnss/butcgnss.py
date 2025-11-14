@@ -58,7 +58,7 @@ try:
 except ImportError:
 	sys.exit('ERROR: Must install rinexlib\n eg openttp/software/system/installsys.py -i rinexlib')
 	
-VERSION = '0.1.1'
+VERSION = '0.2.0'
 AUTHORS = 'Michael Wouters'
 
 SQRT2 = math.sqrt(2)
@@ -96,7 +96,16 @@ def CheckConfig(cfg,req):
 	return ok
 
 # ---------------------------------------------
-def WriteHeader(fout):
+def WriteHeader(fout,header):
+	
+	if (os.path.isfile(header)):
+		with open(header, 'r') as fin:
+			txt = fin.read()
+			fout.write('\n\n')
+			fout.write(txt)
+	else:
+		ottp.Debug(f'Unable to open {header}')
+		
 	# Date column is 10x
 	# MJD  column is 5x
 	# Each GNSS column is 9+5+9+5 = 28 x
@@ -113,7 +122,7 @@ def WriteHeader(fout):
 	
 	hdr = '-'* (16 + len(gnss)*28) 
 	fout.write(hdr+'\n')
-	
+		
 # ---------------------------------------------
 def WriteFooter(fout,footer):
 	if (os.path.isfile(footer)):
@@ -122,7 +131,7 @@ def WriteFooter(fout,footer):
 			fout.write('\n\n')
 			fout.write(txt)
 	else:
-		ottp.Debug('Unable to open {footer}')
+		ottp.Debug(f'Unable to open {footer}')
 
 # ------------------------------------------
 def FindCGTTSFile(gnss,mjd):
@@ -341,6 +350,7 @@ tmpDir  = os.path.join(root,'tmp')
 reportDir = os.path.join(root,'reports')
 cggttsDir = os.path.join(root,'cggtts')
 footer = os.path.join(root,'etc/butcgnss_footer.txt')
+header = os.path.join(root,'etc/butcgnss_header.txt')
 lab = 'AUS'
 httpRequest = 'https://webtai.bipm.org/api/v1.0/get-data.html?'
 
@@ -394,6 +404,9 @@ if 'main:report path' in cfg:
 if 'main:footer' in cfg:
 	footer = ottp.MakeAbsoluteFilePath(cfg['main:footer'],root,footer)
 
+if 'main:header' in cfg:
+	header = ottp.MakeAbsoluteFilePath(cfg['main:header'],root,header)
+	
 if 'main:utck uncertainty' in cfg:
 	minUTCkUncertainty = float(cfg['main:utck uncertainty'])
 	
@@ -545,7 +558,7 @@ while mjd < stopMJD :
 			currReport.write('####################################################################\n')
 			currReport.close()
 			
-		reportName = os.path.join(reportDir,f'brutc{mm:02d}{yyyy:4d}.txt')
+		reportName = os.path.join(reportDir,f'butc{mm:02d}{yyyy:4d}.txt')
 		
 		if UTCupdate:
 			# Check whether the file needs processing
@@ -569,7 +582,7 @@ while mjd < stopMJD :
 		except:
 			sys.exit(f"Couldn't open {reportName}")
 		
-		WriteHeader(currReport)
+		WriteHeader(currReport,header)
 		
 	for g in gnss:
 		ottp.Debug(f'Processing {g}')
