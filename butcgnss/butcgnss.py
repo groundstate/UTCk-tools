@@ -58,7 +58,7 @@ try:
 except ImportError:
 	sys.exit('ERROR: Must install rinexlib\n eg openttp/software/system/installsys.py -i rinexlib')
 	
-VERSION = '0.1.0'
+VERSION = '0.1.1'
 AUTHORS = 'Michael Wouters'
 
 SQRT2 = math.sqrt(2)
@@ -74,10 +74,11 @@ U_CAL_GNSS = {'BDS': 2.4, 'GAL': 2.4 ,'GLO': 3.8, 'GPS': 2.7}
 # Values from Defraigne et al 2023 Metrologia 60 065010,  DOI : 10.1088/1681-7575/ad0562
 U_NAVMSG_GNSS = {'BDS': 0.2, 'GAL': 0.1 ,'GLO':1.2, 'GPS': 1.3}
 
+CIRT_UA = 0.2            # uA as reported in Circular T
+
 CLOCK_MODEL_5071_STD = 1 # standard model
 CLOCK_MODEL_5071_HPT = 2 # high performance model 
 CLOCK_MODEL_MASER    = 3
-
 
 # ------------------------------------------
 def ShowVersion():
@@ -177,7 +178,7 @@ def GetTimeSysCorr(gnss,navFile):
 # ---------------------------------------------
 def GetRefsys(cgBef,cgAft,winSize):
 
-	wSz = 1800*winSize 
+	wSz = 1800*winSize # winSize is in hours
 	refsys0 = None
 	uRefsys0 = None
 	nTracks = 0
@@ -262,7 +263,7 @@ def __GetCircularT(lab,startMJD,stopMJD):
 
 # ---------------------------------------------
 def GetCircularT(lab,startMJD,stopMJD):
-	
+	ottp.Debug('Fetching Circular T');
 	try:
 		r = requests.get(f'{httpRequest}scale=utc&lab={lab}&mjd1={startMJD}&mjd2={stopMJD}&outfile=txt')
 	except:
@@ -313,7 +314,10 @@ def InterpolateUTC(mjd,mjd0,mjd1,cirt):
 	minD = dmjd # use the minimum distance 
 	if mjd1-mjd < minD:
 		minD = mjd1-mjd
-	return utc0 + dmjd*(utc1-utc0)/5, math.sqrt((uFreq*minD)**2 + cirt[mjd0][4])
+	utcm = utc0 + dmjd*(utc1-utc0)/5 # estimate of UTC - UTC(k) by linear interpolation
+	uc   = math.sqrt((uFreq*minD)**2 + cirt[mjd0][3]**2 + cirt[mjd0][4]**2) # combined uncertainty
+	ottp.Debug(f'InterpolateUTC {mjd} {utcm} {uc}')
+	return utcm,uc
 
 
 # -------------------------------------------
@@ -345,7 +349,7 @@ winSize = REFSYS_AVG_WINDOW
 minUTCkUncertainty = 5
 minUTCUncertainty = 6
 clockModel = CLOCK_MODEL_5071_STD
-uACircularT = 0.6
+uACircularT = CIRT_UA
 
 if ottp.LibMajorVersion() >= 0 and ottp.LibMinorVersion() < 2: 
 	sys.exit('Need ottplib minor version >= 2')
@@ -625,6 +629,7 @@ while mjd < stopMJD :
 			#print(deltaUTC,tsCorr,gpsDn,gpsWn,leapSecs)
 			reportData[g][0] = refsys0 + deltaUTC*1.0E9
 			reportData[g][1] = math.sqrt(uRefsys0**2 + uBcirt**2 + U_CAL_GNSS[g]**2 +  U_NAVMSG_GNSS[g]**2) # only uB is relevant here
+			ottp.Debug('UTCk - bUTC {:g} {:d} {:g} {:g} {:g} {:g}'.format(reportData[g][0],mjd,refsys0,uRefsys0,deltaUTC*1.0E9,reportData[g][1]))
 		if UTCupdate:
 			mjdLastDigit = int(str(mjd)[-1])
 			if mjdLastDigit < 4:
@@ -696,6 +701,7 @@ while mjd < stopMJD :
 			reportedUTCUncert = reportData[g][3]
 			if reportedUTCUncert  < minUTCUncertainty:
 				reportedUTCUncert = minUTCUncertainty
+			ottp.Debug(f'{g}: UTC - bUTC {reportData[g][2]} {reportData[g][3]}') # easiest place to put this
 			outputLine += '{:>9}{:>5}{:>9}{:>5}'.format(round(reportData[g][0],1),math.ceil(reportedUTCkUncert),round(reportData[g][2],1),math.ceil(reportedUTCUncert))
 	if (dailyUpdate or UTCupdate):
 		currReport.write(outputLine+'\n')
