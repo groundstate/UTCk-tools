@@ -58,7 +58,7 @@ try:
 except ImportError:
 	sys.exit('ERROR: Must install rinexlib\n eg openttp/software/system/installsys.py -i rinexlib')
 	
-VERSION = '0.2.0'
+VERSION = '0.3.0'
 AUTHORS = 'Michael Wouters'
 
 SQRT2 = math.sqrt(2)
@@ -76,9 +76,9 @@ U_NAVMSG_GNSS = {'BDS': 0.2, 'GAL': 0.1 ,'GLO':1.2, 'GPS': 1.3}
 
 CIRT_UA = 0.2            # uA as reported in Circular T
 
-CLOCK_MODEL_5071_STD = 1 # standard model
-CLOCK_MODEL_5071_HPT = 2 # high performance model 
-CLOCK_MODEL_MASER    = 3
+CLOCK_5071_STD = 1 # standard model
+CLOCK_5071_HPT = 2 # high performance model 
+CLOCK_MASER    = 3
 
 # ------------------------------------------
 def ShowVersion():
@@ -170,19 +170,41 @@ def FindCGTTSFile(gnss,mjd):
 # Returns time system corrections as a dictionary, with the GNSS name as the key
 # and the model parameters in the order of the RINEX file
 # navFile is presumed to be openable
+## TODO earlier RINEX ??
 # ------------------------------------------
-def GetTimeSysCorr(gnss,navFile):
+def GetTimeSysCorr(navFile):
 	
+	tsc = {'BDS': None, 'GAL': None ,'GLO': None, 'GPS': None}
 	fnav = open(navFile,'r')
 	for l in fnav:
-		
-		if gnss == 'GPS':
-			if l[0:4] == 'GPUT': # covers version 2.12 ->
-				# Fields are offset a0, rate a1, tow, wn
-				return [float(l[5:22]), float(l[22:38]), int(l[38:45]),int(l[45:50])]
-			# TODO earlier RINEX 
-				
+		# Fields are offset a0, rate a1, tow, wn 
+		# covers version >= 2.12 
+		if l[0:4] == 'BDUT': # covers version 2.12 ->
+			tsc['BDS'] = [float(l[5:22].replace('D','E')), float(l[22:38].replace('D','E')), int(l[38:45]),int(l[45:50])]
+		elif l[0:4] == 'GAUT':
+			tsc['GAL'] = [float(l[5:22].replace('D','E')), float(l[22:38].replace('D','E')), int(l[38:45]),int(l[45:50])]	
+		elif  l[0:4] == 'GLUT':
+			tsc['GLO'] = [float(l[5:22].replace('D','E')), float(l[22:38].replace('D','E')), int(l[38:45]),int(l[45:50])]	
+		elif  l[0:4] == 'GPUT': 
+			tsc['GPS'] = [float(l[5:22].replace('D','E')), float(l[22:38].replace('D','E')), int(l[38:45]),int(l[45:50])]
+		elif  l[60:73] == 'END OF HEADER': # CHECKED
+			break
 	fnav.close()
+	return tsc
+
+# ------------------------------------------
+def DeltaGNSSUTC(gnss,Wn,Dn,leapSecs,tsCorr):
+	deltaUTC = 0
+	if (gnss == 'GPS') or (gnss == 'GAL'):
+		# From the GPS ICD
+		# t_UTC = t_E - delta_UTC where t_E is 'effective' GPS time 
+		# delta_UTC = dt_LS + A0 + A1*(t_E - t0t + 604800*(WN - Wn_t) )
+		# We want the value at UTC0 for the day which means
+		# t_E = 86400*gpsDn + leapSecs
+		# GAL is the same
+		deltaUTC = 1.0E9*(tsCorr[0] + tsCorr[1]*(86400*Dn + leapSecs - tsCorr[2] + 604800*(Wn - tsCorr[3]))) # in ns
+	ottp.Debug(f'DeltaGNSSUTC: {gnss} {deltaUTC}')
+	return deltaUTC
 
 # ---------------------------------------------
 def GetRefsys(cgBef,cgAft,winSize):
@@ -253,7 +275,7 @@ def GetRefsys(cgBef,cgAft,winSize):
 # Returns Circular T in a list
 # ---------------------------------------------
 def __GetCircularT(lab,startMJD,stopMJD):
-	# Temporary code
+	# Code for testing - be kind to the BIPM web server
 	data = []
 	fin = open(os.path.join(root,'report/cirt.txt'),'r')
 	firstMJD = lastMJD = None
@@ -273,6 +295,7 @@ def __GetCircularT(lab,startMJD,stopMJD):
 # ---------------------------------------------
 def GetCircularT(lab,startMJD,stopMJD):
 	ottp.Debug('Fetching Circular T');
+	ottp.Debug(f'{httpRequest}scale=utc&lab={lab}&mjd1={startMJD}&mjd2={stopMJD}&outfile=txt');
 	try:
 		r = requests.get(f'{httpRequest}scale=utc&lab={lab}&mjd1={startMJD}&mjd2={stopMJD}&outfile=txt')
 	except:
@@ -324,15 +347,17 @@ def InterpolateUTC(mjd,mjd0,mjd1,cirt):
 	if mjd1-mjd < minD:
 		minD = mjd1-mjd
 	utcm = utc0 + dmjd*(utc1-utc0)/5 # estimate of UTC - UTC(k) by linear interpolation
-	uc   = math.sqrt((uFreq*minD)**2 + cirt[mjd0][3]**2 + cirt[mjd0][4]**2) # combined uncertainty
-	ottp.Debug(f'InterpolateUTC {mjd} {utcm} {uc}')
+	uc   = math.sqrt((uFreq*minD)**2 ) 
+	ottp.Debug(f'InterpolateUTC {mjd} {utcm} {uc}, [{utc0} {utc1}]')
 	return utcm,uc
 
 
 # -------------------------------------------
 def ClockStability(clockModel,tauDays):
-	if clockModel == CLOCK_MODEL_5071_STD:
+	if clockModel == CLOCK_5071_STD:
 		return 2.0*math.sqrt(tauDays) # in ns 
+	elif clockModel == CLOCK_MASER:
+		return 0.0 # FIXME
 	else:
 		sys.exit('Requested clock model is unsupported')
 
@@ -358,7 +383,7 @@ winSize = REFSYS_AVG_WINDOW
 
 minUTCkUncertainty = 5
 minUTCUncertainty = 6
-clockModel = CLOCK_MODEL_5071_STD
+clockModel = CLOCK_5071_STD
 uACircularT = CIRT_UA
 
 if ottp.LibMajorVersion() >= 0 and ottp.LibMinorVersion() < 2: 
@@ -367,9 +392,10 @@ if ottp.LibMajorVersion() >= 0 and ottp.LibMinorVersion() < 2:
 examples='TO DO'
 parser = argparse.ArgumentParser(description='Generate UTC(k) - bUTC_GNSS and UTC - bUTC_GNSS ',
 	formatter_class=argparse.RawDescriptionHelpFormatter,epilog=examples)
-parser.add_argument('mjd',nargs = '*',help='first MJD [last MJD] (if not given, the MJD of the previous day is used)')
 parser.add_argument('--config','-c',help='use an alternate configuration file',default=configFile)
 parser.add_argument('--utc','-u',help='generate UTC-bUTC_gnss differences for the previous month',action='store_true')
+parser.add_argument('--month','-m',help='generate differences for the givem month 1..12 (current year assumed)')
+parser.add_argument('--year','-y',help='generate differences for the given year (need to specify month too!)')
 parser.add_argument('--debug','-d',help='debug (to stderr)',action='store_true')
 parser.add_argument('--version','-v',help='show version and exit',action='store_true')
 
@@ -413,8 +439,17 @@ if 'main:utck uncertainty' in cfg:
 if 'main:utc uncertainty' in cfg:
 	minUTCUncertainty = float(cfg['main:utc uncertainty'])
 
-# TODO clock model option
-
+if 'main:clock' in cfg:
+	clk = cfg['main:clock'].lower()
+	if clk == 'hp5071 std':
+		clockModel = CLOCK_5071_STD
+	elif clk == 'hp5071 hpt':
+		clockModel = CLOCK_5071_HPT
+	elif clk == 'maser':
+		clockModel = CLOCK_MASER
+	else:
+		ottp.ErrorExit(f"Unknown clock: {cfg['main:clock']}")
+	
 if 'main:circular t ua' in cfg:
 	uACircularT = float(cfg['main:circular t ua'])
 
@@ -428,38 +463,53 @@ if 'rinex:path' in cfg:
 
 dailyUpdate = False
 UTCupdate   = False
+
+if args.year:
+	if not args.month:
+		ottp.ErrorExit('You need to specify the month as well (--month 1..12)')
+	
 if args.utc:
-	if args.mjd:
-		sys.exit("An MJD range cannot be used with the UTC option")
 	
-	# Processing for the previous two months so we need to work out what that is
-	dt = datetime.now(tz=timezone.utc) # get date in UTC
-	yyyy = dt.year
-	mm   = dt.month
-	dd   = dt.day
-	
-	if (dd < 12): # won't be available yet
-		sys.exit('Too early for Circular T') # we're done
-	if (mm == 1):
-		mm1 = 12
-		mm2 = 11
-		yyyy1 = yyyy2 = yyyy - 1
-	elif (mm == 2):
-		mm1 = 1
-		yyyy1 = yyyy
-		mm2 = 12
-		yyyy2 = yyyy-1
+	if args.month: # manually specified 
+		if args.year:
+			yyyy = int(args.year)
+		else:
+			dt = datetime.now(tz=timezone.utc) # get date in UTC
+			yyyy = dt.year
+		mm   = int(args.month)
+		startMJD = ottp.MJD(datetime(yyyy,mm,1,0,0,0,tzinfo=timezone.utc).timestamp())
+		stopMJD =  startMJD + calendar.monthrange(yyyy,mm)[1] - 1
 	else:
-		mm1 = mm - 1 
-		mm2 = mm - 2
-		yyyy1 = yyyy2 = yyyy
+		
+		# Processing for the previous two months so we need to work out what that is
+		dt = datetime.now(tz=timezone.utc) # get date in UTC
+		yyyy = dt.year
+		mm   = dt.month
+		dd   = dt.day
+		
+		if (dd < 12): # won't be available yet
+			sys.exit('Too early for Circular T') # we're done
+		if (mm == 1):
+			mm1 = 12
+			mm2 = 11
+			yyyy1 = yyyy2 = yyyy - 1
+		elif (mm == 2):
+			mm1 = 1
+			yyyy1 = yyyy
+			mm2 = 12
+			yyyy2 = yyyy-1
+		else:
+			mm1 = mm - 1 
+			mm2 = mm - 2
+			yyyy1 = yyyy2 = yyyy
 	
-	startMJD = ottp.MJD(datetime(yyyy2,mm2,1,0,0,0,tzinfo=timezone.utc).timestamp())
-	stopMJD  = startMJD + calendar.monthrange(yyyy2,mm2)[1] + calendar.monthrange(yyyy1,mm1)[1] - 1
+		startMJD = ottp.MJD(datetime(yyyy2,mm2,1,0,0,0,tzinfo=timezone.utc).timestamp())
+		stopMJD  = startMJD + calendar.monthrange(yyyy2,mm2)[1] + calendar.monthrange(yyyy1,mm1)[1] - 1
+	
 	startMJD -= 1
 	# TESTED January and February 
 	# Check if Circular T is available 
-	cirtAsList,firstMJD,lastMJD = GetCircularT('AUS',startMJD - 7,stopMJD + 7) 
+	cirtAsList,firstMJD,lastMJD = GetCircularT(lab,startMJD - 7,stopMJD + 7) 
 	if not cirtAsList:
 		sys.exit("Couldn't get Circular T")
 	# In UTC update mode it's convenient to have Circular T as a dictionary
@@ -486,20 +536,7 @@ else:
 	
 	dailyUpdate = True 
 	ottp.Debug(f'Default processing range {startMJD} - {stopMJD}')
-
-	if (args.mjd):
-		if 1 == len(args.mjd):
-			startMJD = int(args.mjd[0]) - 1 # need to get the previous day 
-			stopMJD  = int(args.mjd[0])        # 
-		elif ( 2 == len(args.mjd)):
-			startMJD = int(args.mjd[0]) - 1 # need to get the previous day 
-			stopMJD  = int(args.mjd[1])
-			if (stopMJD < startMJD):
-				ottp.ErrorExit('Stop MJD is before start MJD')
-		else:
-			ottp.ErrorExit('Too many MJDs')
-		dailyUpdate = False
-
+	
 	# Need to get Circular T so that we know the current uncertainty uB
 	# Unfortunately the Web API returns the total uncertainty.
 	# In most cases, and for us, uB dominates so for the moment
@@ -519,7 +556,7 @@ else:
 	if (mjdToday - 50 < cirtStartMJD):
 		cirtStartMJD = mjdToday - 50
 
-	cirtAsList,firstMJD,lastMJD = GetCircularT('AUS',cirtStartMJD,cirtStopMJD)
+	cirtAsList,firstMJD,lastMJD = GetCircularT(lab,cirtStartMJD,cirtStopMJD)
 	if not cirtAsList:
 		sys.exit("Couldn't get Circular T")
 	
@@ -529,6 +566,9 @@ else:
 currReport = None # initially, the report file is closed or doesn't yet exist
 mjdLastUTCupdate = None # for tracking if we updated UTC - buTC_GNSS for the whole month
 prevCGGTTSFile = {}
+prevCGGTTSFile['BDS'] = CGGTTS(None,None)
+prevCGGTTSFile['GAL'] = CGGTTS(None,None)
+prevCGGTTSFile['GLO'] = CGGTTS(None,None)
 prevCGGTTSFile['GPS'] = CGGTTS(None,None)
 newData = {}
 
@@ -583,6 +623,26 @@ while mjd < stopMJD :
 			sys.exit(f"Couldn't open {reportName}")
 		
 		WriteHeader(currReport,header)
+	
+	# Find the navigation file
+	navFile,zExt = rinex.FindNavigationFile(rnxDir,staName,yyyy,doy,rnxVersion,False) # don't exit if not found
+
+	timeSysCorr = {}
+	if navFile:
+		ottp.Debug(f'Found {navFile}, compression = {zExt}')
+		src = navFile + zExt
+		srcBase = os.path.basename(src)
+		dst = os.path.join(tmpDir,srcBase)
+		# We may not own the file so we need to make a local copy
+		shutil.copy(src,dst)
+		navFile,zAlgorithm = rinex.Decompress(dst)
+		timeSysCorr = GetTimeSysCorr(navFile)
+		leapSecs = rinex.GetLeapSeconds(navFile,rnxVersion) # read twice so a bit inefficient but anyway
+		os.unlink(navFile)
+		if debug:
+			print(timeSysCorr)
+	else:
+		ottp.Debug("Couldn't find a navigation file for {yyyy} {doy}")
 		
 	for g in gnss:
 		ottp.Debug(f'Processing {g}')
@@ -614,35 +674,23 @@ while mjd < stopMJD :
 			prevCGGTTSFile[g] = cgf
 			continue
 	
-		# Find the navigation file
-		navFile,zExt = rinex.FindNavigationFile(rnxDir,staName,yyyy,doy,rnxVersion,False) # don't exit if not found
-
-		if not navFile:
-			ottp.Debug("Couldn't find a navigation file for {yyyy} {doy}")
+		if not navFile: # check this before we move on
 			prevCGGTTSFile[g] = cgf
 			continue
 			
-		ottp.Debug(f'Found {navFile}, compression = {zExt}')
-		src = navFile + zExt
-		srcBase = os.path.basename(src)
-		dst = os.path.join(tmpDir,srcBase)
-		# We may not own the file so we need to make a local copy
-		shutil.copy(src,dst)
-		navFile,zAlgorithm = rinex.Decompress(dst)
-		tsCorr = GetTimeSysCorr(g,navFile)
-		leapSecs =rinex.GetLeapSeconds(navFile,rnxVersion)
+		tsCorr = timeSysCorr[g]
+		if not tsCorr:
+			ottp.Debug(f'time sys corrections unavailable for {g}')
+			prevCGGTTSFile[g] = cgf
+			continue
+			
+		
 		uAcirt,uBcirt = GetNearestCirtU(cirtAsList,mjd)
-		if g == 'GPS':
-			# From the ICD
-			# t_UTC = t_E - delta_UTC where t_E is 'effective' GPS time 
-			# delta_UTC = dt_LS + A0 + A1*(t_E - t0t + 604800*(WN - Wn_t) )
-			# We want the value at UTC0 for the day which means
-			# t_E = 86400*gpsDn + leapSecs
-			deltaUTC = tsCorr[0] + tsCorr[1]*(86400*gpsDn + leapSecs - tsCorr[2] + 604800*(gpsWn - tsCorr[3]))
-			#print(deltaUTC,tsCorr,gpsDn,gpsWn,leapSecs)
-			reportData[g][0] = refsys0 + deltaUTC*1.0E9
-			reportData[g][1] = math.sqrt(uRefsys0**2 + uBcirt**2 + U_CAL_GNSS[g]**2 +  U_NAVMSG_GNSS[g]**2) # only uB is relevant here
-			ottp.Debug('UTCk - bUTC {:g} {:d} {:g} {:g} {:g} {:g}'.format(reportData[g][0],mjd,refsys0,uRefsys0,deltaUTC*1.0E9,reportData[g][1]))
+		deltaUTC = DeltaGNSSUTC(g,gpsWn,gpsDn,leapSecs,tsCorr)
+			
+		reportData[g][0] = refsys0 + deltaUTC
+		reportData[g][1] = math.sqrt(uRefsys0**2 + uBcirt**2 + U_CAL_GNSS[g]**2 +  U_NAVMSG_GNSS[g]**2) # only uB is relevant here
+		ottp.Debug('UTCk - bUTC {} {:g} {:g} {:g} {:g} {:g}'.format(g,mjd, reportData[g][0],reportData[g][1],refsys0,uRefsys0))
 		if UTCupdate:
 			mjdLastDigit = int(str(mjd)[-1])
 			if mjdLastDigit < 4:
@@ -666,17 +714,18 @@ while mjd < stopMJD :
 				continue
 			
 			# Don't interpolate on CircularT days - smaller uncertainty
-			if (mjd == mjd0 or mjd==mjd1):
-				reportData[g][2] = cirt[mjd][1] + reportData[g][0]
-				reportData[g][3] = math.sqrt(uRefsys0**2 +  uAcirt**2 + uBcirt**2 + U_CAL_GNSS[g]**2 +  U_NAVMSG_GNSS[g]**2) # no contribution from instability
-				mjdLastUTCupdate = mjd
-				prevCGGTTSFile[g] = cgf
-				continue
+			# FIXE this is unnecessary
+			#if (mjd == mjd0 or mjd==mjd1):
+				#reportData[g][2] = cirt[mjd][1] + reportData[g][0]
+				#reportData[g][3] = math.sqrt(uRefsys0**2 +  uAcirt**2 + uBcirt**2 + U_CAL_GNSS[g]**2 +  U_NAVMSG_GNSS[g]**2) # no contribution from instability
+				#mjdLastUTCupdate = mjd
+				#prevCGGTTSFile[g] = cgf
+				#continue
 				
 			utc0 = cirt[mjd0][1]
 			utc1 = cirt[mjd1][1]	
 			
-			utcDiff,utcDiffUncert = InterpolateUTC(mjd,mjd0,mjd1,cirt)
+			utcDiff,utcInterpUncert = InterpolateUTC(mjd,mjd0,mjd1,cirt)
 			reportData[g][2] = utcDiff + reportData[g][0]
 			# Uncertainty sources:
 			# time transfer noise == uRefsys0
@@ -688,9 +737,11 @@ while mjd < stopMJD :
 			if  ClockStability(clockModel,mjd - mjd0) <  UTCkInstability:
 				UTCkInstability = ClockStability(clockModel,mjd1- mjd)
 			
-			reportData[g][3] = math.sqrt(uRefsys0**2 + utcDiffUncert**2 + UTCkInstability**2+ U_CAL_GNSS[g]**2 +  U_NAVMSG_GNSS[g]**2) 
+			reportData[g][3] = math.sqrt(uRefsys0**2 + cirt[mjd0][3]**2 + cirt[mjd0][4]**2 + utcInterpUncert**2 +
+					UTCkInstability**2+ U_CAL_GNSS[g]**2 +  U_NAVMSG_GNSS[g]**2) 
 			
-			mjdLastUTCupdate = mjd
+			mjdLastUTCupdate = mjd # keep track of the last MJD we update so that we can test if a month is complete 
+			
 		prevCGGTTSFile[g] = cgf # save it for the next time
 	
 	if (mjd == startMJD):
