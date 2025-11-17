@@ -58,7 +58,7 @@ try:
 except ImportError:
 	sys.exit('ERROR: Must install rinexlib\n eg openttp/software/system/installsys.py -i rinexlib')
 	
-VERSION = '0.3.0'
+VERSION = '0.4.0'
 AUTHORS = 'Michael Wouters'
 
 SQRT2 = math.sqrt(2)
@@ -96,8 +96,9 @@ def CheckConfig(cfg,req):
 	return ok
 
 # ---------------------------------------------
-def WriteHeader(fout,header):
+def WriteHeader(fout,header,mm,yyyy):
 	
+
 	if (os.path.isfile(header)):
 		with open(header, 'r') as fin:
 			txt = fin.read()
@@ -105,22 +106,32 @@ def WriteHeader(fout,header):
 			fout.write(txt)
 	else:
 		ottp.Debug(f'Unable to open {header}')
-		
+	
+	dt = datetime(yyyy,mm,1)
+	fout.write('Report for {}\n'.format(dt.strftime('%B %Y')))
+	
 	# Date column is 10x
 	# MJD  column is 5x
 	# Each GNSS column is 9+5+9+5 = 28 x
-	hdr1 = hdr2 =  hdr4 = ' '*16 
-	hdr3 = ' '*11 
-	for g in gnss:
-		hdr1 += f'{g:^26}'
+	hdr1 = ' '*18
+	hdr2 =  hdr4 = ' '*17 
+	hdr3 = ' '*11 + '  MJD '
+	
+	for gi in range(0,len(gnss)):
+		g=gnss[gi]
+		hdr1 += '-'*12 + g + '-'*12
 		
-		hdr3 += '{:<5}{:>9}{:>5}{:>9}{:>5}'.format('MJD','UTC('+lab+')','u','UTC','u')
+		hdr3 += '{:>9}{:>5}{:>9}{:>5}'.format('UTC('+lab+')','u','UTC','u')
 		hdr4 += '{:>9}{:>14}'.format('- bUTC','- bUTC')
+		if gi < len(gnss):
+			hdr1 += ' '*2
+			hdr3 += ' '
+			hdr4 += ' '*6
 	fout.write(hdr1+'\n')
 	fout.write(hdr3+'\n')
 	fout.write(hdr4+'\n')
 	
-	hdr = '-'* (16 + len(gnss)*28) 
+	hdr = '-'*(16 + len(gnss)*28 + len(gnss))
 	fout.write(hdr+'\n')
 		
 # ---------------------------------------------
@@ -203,6 +214,8 @@ def DeltaGNSSUTC(gnss,Wn,Dn,leapSecs,tsCorr):
 		# t_E = 86400*gpsDn + leapSecs
 		# GAL is the same
 		deltaUTC = 1.0E9*(tsCorr[0] + tsCorr[1]*(86400*Dn + leapSecs - tsCorr[2] + 604800*(Wn - tsCorr[3]))) # in ns
+	elif (gnss == 'GLO'):
+		deltaUTC = 1.0E9*tsCorr[0]
 	ottp.Debug(f'DeltaGNSSUTC: {gnss} {deltaUTC}')
 	return deltaUTC
 
@@ -274,7 +287,7 @@ def GetRefsys(cgBef,cgAft,winSize):
 
 # Returns Circular T in a list
 # ---------------------------------------------
-def __GetCircularT(lab,startMJD,stopMJD):
+def GetCircularT(lab,startMJD,stopMJD):
 	# Code for testing - be kind to the BIPM web server
 	data = []
 	fin = open(os.path.join(root,'report/cirt.txt'),'r')
@@ -293,7 +306,7 @@ def __GetCircularT(lab,startMJD,stopMJD):
 	return data,firstMJD,lastMJD
 
 # ---------------------------------------------
-def GetCircularT(lab,startMJD,stopMJD):
+def __GetCircularT(lab,startMJD,stopMJD):
 	ottp.Debug('Fetching Circular T');
 	ottp.Debug(f'{httpRequest}scale=utc&lab={lab}&mjd1={startMJD}&mjd2={stopMJD}&outfile=txt');
 	try:
@@ -397,6 +410,7 @@ parser.add_argument('--utc','-u',help='generate UTC-bUTC_gnss differences for th
 parser.add_argument('--month','-m',help='generate differences for the givem month 1..12 (current year assumed)')
 parser.add_argument('--year','-y',help='generate differences for the given year (need to specify month too!)')
 parser.add_argument('--debug','-d',help='debug (to stderr)',action='store_true')
+parser.add_argument('--force','-f',help='force overwriting of an existing reort',action='store_true')
 parser.add_argument('--version','-v',help='show version and exit',action='store_true')
 
 args = parser.parse_args()
@@ -417,6 +431,7 @@ cggtts.SetWarnings(debug)
 cfg=ottp.Initialise(configFile,['main:gnss'])
 
 gnss = cfg['main:gnss'].split(',')
+gnss = [g.strip() for g in gnss] 
 
 if 'main:root' in cfg:
 	root = cfg['main:root']
@@ -607,14 +622,15 @@ while mjd < stopMJD :
 				with fin:
 					txt = fin.read()
 				if 'UTC - bUTC_GNSS updated' in txt:
-					ottp.Debug(f'{reportName} is up to date ... skipping')
-					# FIXME need to skip ahead 
-					# Can do this by changing startMJD to the end of the month
-					print(startMJD)
-					startMJD = startMJD + (calendar.monthrange(yyyy,mm)[1] - 1)  + 1
-					mjd = startMJD - 1 # because we will imediately increment it
-					print(mjd)
-					continue
+					if not args.force:
+						ottp.Debug(f'{reportName} is up to date ... skipping')
+						# Skip ahead
+						# Can do this by changing startMJD to the end of the month
+						startMJD = startMJD + (calendar.monthrange(yyyy,mm)[1] - 1)  + 1
+						mjd = startMJD - 1 # because we will imediately increment it
+						continue
+					else:
+						ottp.Debug(f'{reportName} exists and is up to date ... overwriting')
 		
 		ottp.Debug(f'Creating report {reportName}')
 		try:
@@ -622,7 +638,7 @@ while mjd < stopMJD :
 		except:
 			sys.exit(f"Couldn't open {reportName}")
 		
-		WriteHeader(currReport,header)
+		WriteHeader(currReport,header,mm,yyyy)
 	
 	# Find the navigation file
 	navFile,zExt = rinex.FindNavigationFile(rnxDir,staName,yyyy,doy,rnxVersion,False) # don't exit if not found
@@ -710,7 +726,7 @@ while mjd < stopMJD :
 					reportData[g][2] = cirt[mjd][1] + reportData[g][0]
 					reportData[g][3] = math.sqrt(uRefsys0**2 +  uAcirt**2 + uBcirt**2 + U_CAL_GNSS[g]**2 +  U_NAVMSG_GNSS[g]**2) # no contribution from instability
 					mjdLastUTCupdate = mjd
-				prevCGGTTSFile[g] = cgf
+				prevCGGTTSFile[g] = cgf # this is correct - we only have mjd0, so we're done after tewsing for mjd==mjd0 
 				continue
 			
 			# Don't interpolate on CircularT days - smaller uncertainty
@@ -748,9 +764,11 @@ while mjd < stopMJD :
 		continue
 	
 	# If we can't generate the data, mark it as missing'
-	outputLine = f'{yyyy:4d}-{mm:02d}-{dd:02d} {mjd:5d}'
+	outputLine = f'{yyyy:4d}-{mm:02d}-{dd:02d} {mjd:5d} ' # 17 characters
 	missingData = '*'
-	for g in gnss:
+
+	for gi in range(0,len(gnss)):
+		g = gnss[gi]
 		if reportData[g][0]==None:
 			outputLine += f'{missingData:>9}{missingData:>5}{missingData:>9}{missingData:>5}'
 		elif reportData[g][2]==None:
@@ -767,6 +785,8 @@ while mjd < stopMJD :
 				reportedUTCUncert = minUTCUncertainty
 			ottp.Debug(f'{g}: UTC - bUTC {reportData[g][2]} {reportData[g][3]}') # easiest place to put this
 			outputLine += '{:>9}{:>5}{:>9}{:>5}'.format(round(reportData[g][0],1),math.ceil(reportedUTCkUncert),round(reportData[g][2],1),math.ceil(reportedUTCUncert))
+		if gi < len(gnss):
+			outputLine += ' '
 	if (dailyUpdate or UTCupdate):
 		currReport.write(outputLine+'\n')
 	newData[mjd] = outputLine + '\n'
@@ -776,11 +796,11 @@ if currReport:
 	WriteFooter(currReport,footer)
 	currReport.write('\n\n####################################################################\n')
 	currReport.write(f'Generated by {os.path.basename(sys.argv[0])} v{VERSION}\n')
-	if (mjdLastUTCupdate == mjd -1): # FIXME may be wrong
+	if (mjdLastUTCupdate == mjd): # FIXME may be wrong
 		currReport.write('UTC - bUTC_GNSS updated {}\n'.format(datetime.now(tz=timezone.utc).strftime('%Y-%m-%d')))
 	currReport.write('####################################################################\n')
 	currReport.close()		
 
 	
-	
+
 	
