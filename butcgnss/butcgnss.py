@@ -58,7 +58,7 @@ try:
 except ImportError:
 	sys.exit('ERROR: Must install rinexlib\n eg openttp/software/system/installsys.py -i rinexlib')
 	
-VERSION = '0.4.0'
+VERSION = '0.5.0'
 AUTHORS = 'Michael Wouters'
 
 SQRT2 = math.sqrt(2)
@@ -177,6 +177,14 @@ def FindCGTTSFile(gnss,mjd):
 			if (not os.path.isfile(fname)): 
 				ottp.Debug(f"Couldn't find alternate CGGTTS file path={path} prefix={prefix} extension={ext} - must be the End of Days")
 	return fname
+
+# Note that this does not assume that the input MJD is an integer
+def MJDtoBDSWeekDay(mjd):
+	# Epoch for BDT is  0h UTC 1 Jan 2006 == MJD 53736
+	ttBDS = (mjd - 53736)*86400 # number of seconds since the epoch
+	BDSWn = int(ttBDS/(7*86400))
+	BDSday = int((ttBDS - 7*86400*BDSWn)/86400)
+	return (BDSWn,BDSday)
 	
 # Returns time system corrections as a dictionary, with the GNSS name as the key
 # and the model parameters in the order of the RINEX file
@@ -203,10 +211,11 @@ def GetTimeSysCorr(navFile):
 	fnav.close()
 	return tsc
 
+# Note that leapSecs is added to to the time we calculate for
 # ------------------------------------------
 def DeltaGNSSUTC(gnss,Wn,Dn,leapSecs,tsCorr):
 	deltaUTC = 0
-	if (gnss == 'GPS') or (gnss == 'GAL'):
+	if (gnss == 'GPS') or (gnss == 'GAL') or (gnss == 'BDS'):
 		# From the GPS ICD
 		# t_UTC = t_E - delta_UTC where t_E is 'effective' GPS time 
 		# delta_UTC = dt_LS + A0 + A1*(t_E - t0t + 604800*(WN - Wn_t) )
@@ -287,7 +296,7 @@ def GetRefsys(cgBef,cgAft,winSize):
 
 # Returns Circular T in a list
 # ---------------------------------------------
-def GetCircularT(lab,startMJD,stopMJD):
+def __GetCircularT(lab,startMJD,stopMJD):
 	# Code for testing - be kind to the BIPM web server
 	data = []
 	fin = open(os.path.join(root,'report/cirt.txt'),'r')
@@ -306,7 +315,7 @@ def GetCircularT(lab,startMJD,stopMJD):
 	return data,firstMJD,lastMJD
 
 # ---------------------------------------------
-def __GetCircularT(lab,startMJD,stopMJD):
+def GetCircularT(lab,startMJD,stopMJD):
 	ottp.Debug('Fetching Circular T');
 	ottp.Debug(f'{httpRequest}scale=utc&lab={lab}&mjd1={startMJD}&mjd2={stopMJD}&outfile=txt');
 	try:
@@ -361,7 +370,7 @@ def InterpolateUTC(mjd,mjd0,mjd1,cirt):
 		minD = mjd1-mjd
 	utcm = utc0 + dmjd*(utc1-utc0)/5 # estimate of UTC - UTC(k) by linear interpolation
 	uc   = math.sqrt((uFreq*minD)**2 ) 
-	ottp.Debug(f'InterpolateUTC {mjd} {utcm} {uc}, [{utc0} {utc1}]')
+	ottp.Debug(f'InterpolateUTC {mjd} {utcm} +/- {uc}, [{utc0} {utc1}]')
 	return utcm,uc
 
 
@@ -599,8 +608,9 @@ while mjd < stopMJD :
 	mm   = dt.month
 	dd   = dt.day
 	doy = int(dt.strftime('%j'))
-	gpsWn,gpsDn = ottp.MJDtoGPSWeekDay(mjd)
-	ottp.Debug(f'\nProcessing {mjd}: {yyyy}-{mm}-{dd}, WN={gpsWn} DN={gpsDn}')
+	
+	
+	ottp.Debug(f'\nProcessing {mjd}: {yyyy}-{mm}-{dd}')
 	
 	if (dt.day == 1) and (dailyUpdate or UTCupdate): # beginning of month
 		# Close any open file
@@ -662,6 +672,14 @@ while mjd < stopMJD :
 		
 	for g in gnss:
 		ottp.Debug(f'Processing {g}')
+		
+		if g == 'BDS':
+			Wn,Dn = MJDtoBDSWeekDay(mjd)
+		else:
+			Wn,Dn = ottp.MJDtoGPSWeekDay(mjd)
+		
+		ottp.Debug(f'Processing {g} WN = {Wn} DN = {Dn}')
+	
 		reportData[g] = [None,None,None,None] # Fields are UTC(k)-bUTC_GNSS, u, UTC - bUTC_GNSS, u]
 		
 		fName = FindCGTTSFile(g,mjd)
@@ -702,11 +720,11 @@ while mjd < stopMJD :
 			
 		
 		uAcirt,uBcirt = GetNearestCirtU(cirtAsList,mjd)
-		deltaUTC = DeltaGNSSUTC(g,gpsWn,gpsDn,leapSecs,tsCorr)
+		deltaUTC = DeltaGNSSUTC(g,Wn,Dn,leapSecs,tsCorr)
 			
 		reportData[g][0] = refsys0 + deltaUTC
 		reportData[g][1] = math.sqrt(uRefsys0**2 + uBcirt**2 + U_CAL_GNSS[g]**2 +  U_NAVMSG_GNSS[g]**2) # only uB is relevant here
-		ottp.Debug('UTCk - bUTC {} {:g} {:g} {:g} {:g} {:g}'.format(g,mjd, reportData[g][0],reportData[g][1],refsys0,uRefsys0))
+		ottp.Debug('UTCk - bUTC {} {:g} {:g} +/- {:g} refsys0={:g} urefsys0={:g}'.format(g,mjd, reportData[g][0],reportData[g][1],refsys0,uRefsys0))
 		if UTCupdate:
 			mjdLastDigit = int(str(mjd)[-1])
 			if mjdLastDigit < 4:
@@ -783,7 +801,7 @@ while mjd < stopMJD :
 			reportedUTCUncert = reportData[g][3]
 			if reportedUTCUncert  < minUTCUncertainty:
 				reportedUTCUncert = minUTCUncertainty
-			ottp.Debug(f'{g}: UTC - bUTC {reportData[g][2]} {reportData[g][3]}') # easiest place to put this
+			ottp.Debug(f'{g}: UTC - bUTC {reportData[g][2]} +/- {reportData[g][3]}') # easiest place to put this
 			outputLine += '{:>9}{:>5}{:>9}{:>5}'.format(round(reportData[g][0],1),math.ceil(reportedUTCkUncert),round(reportData[g][2],1),math.ceil(reportedUTCUncert))
 		if gi < len(gnss):
 			outputLine += ' '
