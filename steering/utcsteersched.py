@@ -65,7 +65,7 @@ sys.path.append("/usr/local/lib/python3.10/site-packages") # Ubuntu 22.04
 
 import ottplib as ottp
 
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 AUTHORS = "Michael Wouters"
 
 UTCR_LATENCY = 3
@@ -143,6 +143,7 @@ tmpDir = os.path.join(home,'tmp')
 recipients = 'time@measurement.gov.au'
 email = True
 bipmurl = 'https://webtai.bipm.org/api/v1.0'
+rootCert = None # if you use an empty string, this will skip SSL verification which is a bad thing
 
 parser = argparse.ArgumentParser(description='Report on UTCr(k) from Rapid UTC data',
 	formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -189,6 +190,9 @@ if ('main:clock data' in cfg):
 if ('main:flywheel' in cfg):
 	PHYCLK = cfg['main:flywheel']
 	
+if ('main:root certificate' in cfg):
+	rootCert= cfg['main:root certificate']
+	
 logFile = os.path.join(logDir,'utcsteer.log') # this log will be common to several scripts
 Log(logFile,'running')
 
@@ -221,7 +225,6 @@ if not(args.force):
 mjd1 = lastMJD - historyLength
 mjd2 = lastMJD
 
-
 # Get the data
 
 dmjd = []
@@ -230,31 +233,35 @@ dutck = []
 ottp.Debug('Fetching data for interval {:d} {:d}'.format(mjd1,mjd2))
 
 # Have we already got the data ?
-# Check the file lastUTCrDownload
-if (os.path.exists(os.path.join(controlDir,lastUTCrFile))):
-	fin = open(os.path.join(controlDir,lastUTCrFile),'r')
-	lastUTCr = -1 # flags failure to get this
-	for l in fin:
-		if re.match(r'^#',l): # ignore comments
-			continue
-		matches = re.match(r'MJD\s+(\d{5})',l)
-		if matches:
-			lastUTCr = int(matches.group(1))
-			ottp.Debug('Last UTCr {:d}'.format(lastUTCr))
-			break
-	fin.close()
-	
-	# We have already checked the run window
-	if (lastUTCr == lastMJD):
-		ottp.Debug('Nothing to do')
-		sys.exit(0)
+if not(args.force):
+	# Check the file lastUTCrDownload
+	if (os.path.exists(os.path.join(controlDir,lastUTCrFile))):
+		fin = open(os.path.join(controlDir,lastUTCrFile),'r')
+		lastUTCr = -1 # flags failure to get this
+		for l in fin:
+			if re.match(r'^#',l): # ignore comments
+				continue
+			matches = re.match(r'MJD\s+(\d{5})',l)
+			if matches:
+				lastUTCr = int(matches.group(1))
+				ottp.Debug('Last UTCr {:d}'.format(lastUTCr))
+				break
+		fin.close()
+		
+		# We have already checked the run window
+		if (lastUTCr == lastMJD):
+			ottp.Debug('Nothing to do')
+			sys.exit(0)
+	else:
+		ottp.Debug('No UTCr download record was found .. downloading')
 else:
-	ottp.Debug('No UTCr download record was found .. downloading')
+	ottp.Debug('Forcing UTCR download')
 	
 httpreq = '{}/get-data.html?scale=utcr&lab={}&outfile=txt&mjd1={:d}&mjd2={:d}'.format(bipmurl,UTCID,mjd1,mjd2)
 try:
-	resp = requests.get(httpreq)
-except:
+	resp = requests.get(httpreq,verify=rootCert)
+except Exception as e:
+	print(e)
 	sys.exit(1)
 
 # Parse what we got back
