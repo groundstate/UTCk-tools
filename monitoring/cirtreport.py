@@ -54,7 +54,7 @@ sys.path.append("/usr/local/lib/python3.12/site-packages") # Ubuntu 24.04
 
 import ottplib as ottp
 
-VERSION = "1.0.1"
+VERSION = "1.1.0"
 AUTHORS = "Michael Wouters"
 
 # ------------------------------------------
@@ -67,7 +67,7 @@ def Warn(msg):
 def GetCircularT(lab,startMJD,stopMJD):
 	ottp.Debug('Fetching Circular T data ...')
 	try:
-		r = requests.get(f'{httpRequest}scale=utc&lab={lab}&mjd1={startMJD}&mjd2={stopMJD}&outfile=txt')
+		r = requests.get(f'{httpRequest}scale=utc&lab={lab}&mjd1={startMJD}&mjd2={stopMJD}&outfile=txt',verify=rootCert)
 	except:
 		return None,None
 	ottp.Debug('... done')
@@ -98,6 +98,7 @@ recipients = 'time@measurement.gov.au'
 email = False
 lab = 'AUS'
 httpRequest ='https://webtai.bipm.org/api/v1.0/get-data.html?'
+rootCert = None # if you use an empty string, this will skip SSL verification which is a bad thing
 
 tt = time.time()
 mjdToday = int(tt/86400)+40587
@@ -146,7 +147,10 @@ if ('main:report path' in cfg):
 
 if ('main:tmp path' in cfg):
 	tmpDir = ottp.MakeAbsolutePath(cfg['main:tmp path'],home) 
-	
+
+if ('main:root certificate' in cfg):
+	rootCert= cfg['main:root certificate']
+
 stopMJD  = mjdToday
 startMJD = stopMJD - (historyLength+1)*31 # no need to be fussy here
 
