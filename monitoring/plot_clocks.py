@@ -52,7 +52,7 @@ sys.path.append("/usr/local/lib/python3.12/site-packages") # Ubuntu 24.04
 
 import ottplib as ottp
 
-VERSION = "1.0.2"
+VERSION = "1.1.0"
 AUTHORS = "Michael Wouters"
 
 UTCR_LATENCY = 3     # in days
@@ -83,6 +83,8 @@ tmpDir  = './'
 utcBaseDir = UTC_BASE_DIR
 clkDefinitionsDir = CLK_DEFS_DIR
 historyLength = 3 # in months
+rootCert = None
+# rootCert = '/usr/local/share/ca-certificates/NSrootcaCert.crt'
 
 bipmurl = 'https://webtai.bipm.org/api/v1.0'
 
@@ -98,6 +100,7 @@ parser.add_argument('--year',help='year  of report')
 parser.add_argument('--utcbase',help = f'base directory for UTC reporting (default = {utcBaseDir})',default=utcBaseDir)
 parser.add_argument('--tmp',help = f'directory for temporary files (default = {tmpDir} )',default = tmpDir)
 parser.add_argument('--utc',help = 'generate file for UTC reporting',action='store_true')
+parser.add_argument('--rootcert',help = 'set the SSL root certificate',default=rootCert)
 parser.add_argument('--version','-v',action='version',version = appName + ' ' + VERSION + '\n' + 'Written by ' + AUTHORS)
 
 args = parser.parse_args()
@@ -221,7 +224,7 @@ else:
 
 	httpreq = '{}/get-data.html?scale=utcr&lab={}&outfile=txt&mjd1={:d}&mjd2={:d}'.format(bipmurl,UTCID,mjd1,mjd2)
 	try:
-		resp = requests.get(httpreq)
+		resp = requests.get(httpreq,verify=rootCert)
 		gotUTCr = True
 	except:
 		Warn('UTCr download failed')
