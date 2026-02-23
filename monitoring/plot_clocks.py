@@ -52,7 +52,7 @@ sys.path.append("/usr/local/lib/python3.12/site-packages") # Ubuntu 24.04
 
 import ottplib as ottp
 
-VERSION = "1.1.0"
+VERSION = "1.1.1"
 AUTHORS = "Michael Wouters"
 
 UTCR_LATENCY = 3     # in days
@@ -205,7 +205,7 @@ if (os.path.exists(futcr) and not(args.force)):
 	ottp.Debug(f'UTCr file {futcr } exists - loading')
 	fin = open(futcr,'r')
 	for l in fin:
-		if re.match('\s*#',l): # ignore comments
+		if re.match(r'\s*#',l): # ignore comments
 			continue
 		ldata = l.split()
 		if len(ldata) == 3: # v0.2 had two fields, v1.0 has three 
@@ -388,7 +388,7 @@ with PdfPages(plotFileName) as pdf:
 		dstr = prevMonth.strftime('%B %Y')
 		title = 'Clock performance for ' + dstr + '\n'
 		title += plotFileName + '\n'
-		title += os.path.basename(sys.argv[0])+ ' v' + VERSION   + '     run ' + datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S') + '\n'
+		title += os.path.basename(sys.argv[0])+ ' v' + VERSION   + '     run ' + datetime.datetime.now(datetime.UTC).strftime('%Y-%m-%d %H:%M:%S') + '\n'
 		fig.suptitle(title,ha='left',x=0.1)
 				
 		ax1.plot(utcr[0],utcr[1])
