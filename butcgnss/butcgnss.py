@@ -58,7 +58,7 @@ try:
 except ImportError:
 	sys.exit('ERROR: Must install rinexlib\n eg openttp/software/system/installsys.py -i rinexlib')
 	
-VERSION = '0.5.0'
+VERSION = '0.6.0'
 AUTHORS = 'Michael Wouters'
 
 SQRT2 = math.sqrt(2)
@@ -79,6 +79,12 @@ CIRT_UA = 0.2            # uA as reported in Circular T
 CLOCK_5071_STD = 1 # standard model
 CLOCK_5071_HPT = 2 # high performance model 
 CLOCK_MASER    = 3
+
+# Indices for computed data array
+D_UTCK_BUTC = 0
+U_UTCK_BUTC = 1
+D_UTC_BUTC  = 2
+U_UTC_BUTC  = 3
 
 # ------------------------------------------
 def ShowVersion():
@@ -649,7 +655,7 @@ while mjd < stopMJD :
 			sys.exit(f"Couldn't open {reportName}")
 		
 		WriteHeader(currReport,header,mm,yyyy)
-	
+		
 	# Find the navigation file
 	navFile,zExt = rinex.FindNavigationFile(rnxDir,staName,yyyy,doy,rnxVersion,False) # don't exit if not found
 
@@ -722,9 +728,9 @@ while mjd < stopMJD :
 		uAcirt,uBcirt = GetNearestCirtU(cirtAsList,mjd)
 		deltaUTC = DeltaGNSSUTC(g,Wn,Dn,leapSecs,tsCorr)
 			
-		reportData[g][0] = refsys0 + deltaUTC
-		reportData[g][1] = math.sqrt(uRefsys0**2 + uBcirt**2 + U_CAL_GNSS[g]**2 +  U_NAVMSG_GNSS[g]**2) # only uB is relevant here
-		ottp.Debug('UTCk - bUTC {} {:g} {:g} +/- {:g} refsys0={:g} urefsys0={:g}'.format(g,mjd, reportData[g][0],reportData[g][1],refsys0,uRefsys0))
+		reportData[g][D_UTCK_BUTC] = refsys0 + deltaUTC
+		reportData[g][U_UTCK_BUTC] = math.sqrt(uRefsys0**2 + uBcirt**2 + U_CAL_GNSS[g]**2 +  U_NAVMSG_GNSS[g]**2) # only uB is relevant here
+		ottp.Debug('UTCk - bUTC {} {:g} {:g} +/- {:g} refsys0={:g} urefsys0={:g}'.format(g,mjd, reportData[g][D_UTCK_BUTC],reportData[g][U_UTCK_BUTC],refsys0,uRefsys0))
 		if UTCupdate:
 			mjdLastDigit = int(str(mjd)[-1])
 			if mjdLastDigit < 4:
@@ -741,8 +747,8 @@ while mjd < stopMJD :
 			if not(mjd1 in cirt): # special case: can't interpolate but can do mjd ==  mjd0 and get one more day
 				ottp.Debug(f'{mjd1} not in CirT')
 				if (mjd == mjd0):
-					reportData[g][2] = cirt[mjd][1] + reportData[g][0]
-					reportData[g][3] = math.sqrt(uRefsys0**2 +  uAcirt**2 + uBcirt**2 + U_CAL_GNSS[g]**2 +  U_NAVMSG_GNSS[g]**2) # no contribution from instability
+					reportData[g][D_UTC_BUTC] = cirt[mjd][1] + reportData[g][D_UTCK_BUTC]
+					reportData[g][U_UTC_BUTC] = math.sqrt(uRefsys0**2 +  uAcirt**2 + uBcirt**2 + U_CAL_GNSS[g]**2 +  U_NAVMSG_GNSS[g]**2) # no contribution from instability
 					mjdLastUTCupdate = mjd
 				prevCGGTTSFile[g] = cgf # this is correct - we only have mjd0, so we're done after tewsing for mjd==mjd0 
 				continue
@@ -750,8 +756,8 @@ while mjd < stopMJD :
 			# Don't interpolate on CircularT days - smaller uncertainty
 			# FIXE this is unnecessary
 			#if (mjd == mjd0 or mjd==mjd1):
-				#reportData[g][2] = cirt[mjd][1] + reportData[g][0]
-				#reportData[g][3] = math.sqrt(uRefsys0**2 +  uAcirt**2 + uBcirt**2 + U_CAL_GNSS[g]**2 +  U_NAVMSG_GNSS[g]**2) # no contribution from instability
+				#reportData[g][D_UTC_BUTC] = cirt[mjd][1] + reportData[g][D_UTCK_BUTC]
+				#reportData[g][U_UTC_BUTC] = math.sqrt(uRefsys0**2 +  uAcirt**2 + uBcirt**2 + U_CAL_GNSS[g]**2 +  U_NAVMSG_GNSS[g]**2) # no contribution from instability
 				#mjdLastUTCupdate = mjd
 				#prevCGGTTSFile[g] = cgf
 				#continue
@@ -760,7 +766,7 @@ while mjd < stopMJD :
 			utc1 = cirt[mjd1][1]	
 			
 			utcDiff,utcInterpUncert = InterpolateUTC(mjd,mjd0,mjd1,cirt)
-			reportData[g][2] = utcDiff + reportData[g][0]
+			reportData[g][D_UTC_BUTC] = utcDiff + reportData[g][D_UTCK_BUTC]
 			# Uncertainty sources:
 			# time transfer noise == uRefsys0
 			# UTC interpolation uncertainty == utcUncert (which includes the link calibration uncertainty)
@@ -771,7 +777,7 @@ while mjd < stopMJD :
 			if  ClockStability(clockModel,mjd - mjd0) <  UTCkInstability:
 				UTCkInstability = ClockStability(clockModel,mjd1- mjd)
 			
-			reportData[g][3] = math.sqrt(uRefsys0**2 + cirt[mjd0][3]**2 + cirt[mjd0][4]**2 + utcInterpUncert**2 +
+			reportData[g][U_UTC_BUTC] = math.sqrt(uRefsys0**2 + cirt[mjd0][3]**2 + cirt[mjd0][4]**2 + utcInterpUncert**2 +
 					UTCkInstability**2+ U_CAL_GNSS[g]**2 +  U_NAVMSG_GNSS[g]**2) 
 			
 			mjdLastUTCupdate = mjd # keep track of the last MJD we update so that we can test if a month is complete 
@@ -787,22 +793,22 @@ while mjd < stopMJD :
 
 	for gi in range(0,len(gnss)):
 		g = gnss[gi]
-		if reportData[g][0]==None:
+		if reportData[g][D_UTCK_BUTC]==None:
 			outputLine += f'{missingData:>9}{missingData:>5}{missingData:>9}{missingData:>5}'
-		elif reportData[g][2]==None:
-			reportedUTCkUncert = reportData[g][1]
+		elif reportData[g][D_UTC_BUTC]==None:
+			reportedUTCkUncert = reportData[g][U_UTCK_BUTC]
 			if reportedUTCkUncert  < minUTCkUncertainty:
 				reportedUTCkUncert = minUTCkUncertainty
-			outputLine += '{:>9}{:>5}{:>9}{:>5}'.format(round(reportData[g][0],1),math.ceil(reportedUTCkUncert),missingData,missingData)
+			outputLine += '{:>9}{:>5}{:>9}{:>5}'.format(round(reportData[g][D_UTCK_BUTC],1),math.ceil(reportedUTCkUncert),missingData,missingData)
 		else:
-			reportedUTCkUncert = reportData[g][1]
+			reportedUTCkUncert = reportData[g][U_UTCK_BUTC]
 			if reportedUTCkUncert  < minUTCkUncertainty:
 				reportedUTCkUncert = minUTCkUncertainty
-			reportedUTCUncert = reportData[g][3]
+			reportedUTCUncert = reportData[g][U_UTC_BUTC]
 			if reportedUTCUncert  < minUTCUncertainty:
 				reportedUTCUncert = minUTCUncertainty
-			ottp.Debug(f'{g}: UTC - bUTC {reportData[g][2]} +/- {reportData[g][3]}') # easiest place to put this
-			outputLine += '{:>9}{:>5}{:>9}{:>5}'.format(round(reportData[g][0],1),math.ceil(reportedUTCkUncert),round(reportData[g][2],1),math.ceil(reportedUTCUncert))
+			ottp.Debug(f'{g}: UTC - bUTC {reportData[g][D_UTC_BUTC]} +/- {reportData[g][U_UTC_BUTC]}') # easiest place to put this
+			outputLine += '{:>9}{:>5}{:>9}{:>5}'.format(round(reportData[g][D_UTCK_BUTC],1),math.ceil(reportedUTCkUncert),round(reportData[g][D_UTC_BUTC],1),math.ceil(reportedUTCUncert))
 		if gi < len(gnss):
 			outputLine += ' '
 	if (dailyUpdate or UTCupdate):
@@ -811,6 +817,7 @@ while mjd < stopMJD :
 
 # Finish off any currently open file	
 if currReport:
+	
 	WriteFooter(currReport,footer)
 	currReport.write('\n\n####################################################################\n')
 	currReport.write(f'Generated by {os.path.basename(sys.argv[0])} v{VERSION}\n')
