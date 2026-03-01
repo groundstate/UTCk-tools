@@ -71,7 +71,7 @@ def md5sum(filePath):
 	except Exception as e:
 		return f"An error occurred: {e}"
 			
-VERSION = "0.4.0"
+VERSION = "0.4.1"
 AUTHORS = "Michael Wouters"
 
 NCHECK = 10        # number of MJDs to go back for check
@@ -323,7 +323,7 @@ if email:
 	fp = open(plotfile,'rb')
 	msgImage = MIMEImage(fp.read())
 	fp.close()
-	msgImage.add_header('Content-ID', '<utcrclock>')
+	msgImage.add_header('Content-ID', '<utcrclocks>')
 	msg.attach(msgImage)
 	
 	# Send the message via local SMTP server.
@@ -332,4 +332,4 @@ if email:
 	s.quit()
 	
 if not(debug):
-	unlink('utcrclocks.png')
+	os.unlink(plotfile)
