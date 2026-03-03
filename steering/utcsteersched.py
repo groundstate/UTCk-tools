@@ -83,31 +83,6 @@ def Log(logFile,msg):
 		ottp.Debug('Unable to log message')
 	return
 
-# ------------------------------------------
-def Warn(msg):
-	if (not args.nowarn):
-		sys.stderr.write('WARNING! '+ msg+'\n')
-	return
-
-# ------------------------------------------
-def ErrorExit(msg):
-	sys.stderr.write(msg+'\n')
-	sys.exit(0)
-	
-# ------------------------------------------
-def Initialise(configFile):
-	cfg=ottp.LoadConfig(configFile,{'tolower':True})
-	if (cfg == None):
-		ErrorExit("Error loading " + configFile)
-		
-	# Check for required arguments
-	reqd = []
-	for k in reqd:
-		if (not k in cfg):
-			ErrorExit("The required configuration entry " + k + " is undefined")
-		
-	return cfg
-
 		
 # ------------------------------------------
 
@@ -140,7 +115,11 @@ scheduledDir = os.path.join(controlDir,'scheduled_steer')
 processedDir = os.path.join(controlDir,'processed_steers')
 historyLength = 90 # in days
 tmpDir = os.path.join(home,'tmp')
-recipients = 'time@measurement.gov.au'
+
+emailRecipients = 'time@measurement.gov.au'
+emailSender = 'time@measurement.gov.au'
+SMTPserver = 'localhost'
+
 email = True
 bipmurl = 'https://webtai.bipm.org/api/v1.0'
 rootCert = None # if you use an empty string, this will skip SSL verification which is a bad thing
@@ -161,7 +140,7 @@ ottp.SetDebugging(args.debug)
 configFile = args.config
 forceSteer = args.force
 
-cfg = Initialise(configFile)
+cfg=ottp.Initialise(configFile,[])
 
 if ('main:history' in cfg):
 	historyLength = int(cfg['main:history'])
@@ -171,6 +150,12 @@ if ('main:utc id' in cfg):
 
 if ('main:email recipients' in cfg):
 	recipients = cfg['main:email recipients']
+
+if ('main:email sender' in cfg):
+	emailSender = cfg['main:email sender']
+
+if ('main:smtp server' in cfg):
+	SMTPserver = cfg['main:smtp server']
 	
 if ('main:reports' in cfg):
 	repDir = os.path.join(home,cfg['main:reports']) 
@@ -217,10 +202,10 @@ ottp.Debug('Last MJD in UTCr should be ' + str(lastMJD))
 # Should be running at least 3 days after 'lastMJD'
 if not(args.force):
 	if (mjdToday - lastMJD < UTCR_LATENCY):
-		ErrorExit('Running too early - next run needs to be at least {:d}'.format(lastMJD+3))
+		ottp.ErrorExit('Running too early - next run needs to be at least {:d}'.format(lastMJD+3))
 	# Shouldn't run too late either
 	if (mjdToday - lastMJD > UTCR_LATENCY + 1):
-		ErrorExit('Running too late (limit is MJD {:d}) '.format(lastMJD + UTCR_LATENCY + 1))
+		ottp.ErrorExit('Running too late (limit is MJD {:d}) '.format(lastMJD + UTCR_LATENCY + 1))
 	
 mjd1 = lastMJD - historyLength
 mjd2 = lastMJD
@@ -623,17 +608,17 @@ fout.write(repBody)
 fout.close()
 
 # Create a pdf from html
+# This is retained as a record of the steering
 cmd = '/usr/bin/htmldoc --quiet --webpage -f ' + repPDF + ' ' + repHTML
 os.system(cmd)
 
 if email:
-	sender = 'time@measurement.gov.au'
-
+	
 	msg = MIMEMultipart('related')
 	msg['Subject'] = 'Weekly UTC steering advisory for ' + dt.strftime('%Y-%m-%d')
-	msg['From'] = sender
-	msg['To'] = recipients
-	msg['Reply-To'] = sender
+	msg['From'] = emailSender
+	msg['To'] = emailRecipients
+	msg['Reply-To'] = emailSender
 
 	body = MIMEText(html,'html')
 	msg.attach(body)
@@ -657,7 +642,7 @@ if email:
 	msg.attach(msgImage)
 
 	# Send the message via local SMTP server.
-	s = smtplib.SMTP('copperhead.in.measurement.gov.au')
+	s = smtplib.SMTP(SMTPserver)
 	s.sendmail(sender,recipients.split(','), msg.as_string())
 	s.quit()
 
