@@ -66,7 +66,7 @@ SQRT2 = math.sqrt(2)
 
 REFSYS_AVG_WINDOW = 2 # window size for averaging
 
-NREGENERATE = 7 # number of days to regenerate prior to the current day (when not running with explicit MJD range)
+NPREVDAYS = 60 # number of days to regenerate prior to the current day (when not running with explicit MJD range)
 
 # Uncertainty of GNSS provider's link calibration 
 # Values from Defraigne et al 2023 Metrologia 60 065010,  DOI : 10.1088/1681-7575/ad0562
@@ -364,8 +364,6 @@ winSize = REFSYS_AVG_WINDOW
 
 clockModel = CLOCK_5071_STD
 uACircularT = CIRT_UA
-dailyUpdate = True
-updateUTC   = False
 
 if ottp.LibMajorVersion() >= 0 and ottp.LibMinorVersion() < 2: 
 	sys.exit('Need ottplib minor version >= 2')
@@ -373,9 +371,8 @@ if ottp.LibMajorVersion() >= 0 and ottp.LibMinorVersion() < 2:
 examples='TO DO'
 parser = argparse.ArgumentParser(description='Generate UTC(k) - bUTC_GNSS and UTC - bUTC_GNSS ',
 	formatter_class=argparse.RawDescriptionHelpFormatter,epilog=examples)
-parser.add_argument('mjd',nargs = '*',help='first MJD [last MJD] (if not given, the MJD of the previous day is used)')
+parser.add_argument('mjd',nargs = '*',help='first MJD [last MJD] (if not given, the MJD of the previous day is used as the last MJD)')
 parser.add_argument('--config','-c',help='use an alternate configuration file',default=configFile)
-parser.add_argument('--utc','-u',help='generate UTC-bUTC_gnss differences',action='store_true')
 parser.add_argument('--debug','-d',help='debug (to stderr)',action='store_true')
 parser.add_argument('--version','-v',help='show version and exit',action='store_true')
 
@@ -394,24 +391,24 @@ debug = args.debug
 ottp.SetDebugging(debug)
 cggtts.SetWarnings(debug)
 
-# The default is to update UTC(k) - bUTC_GNSS for the previous day
+# If an MJD range is not specified then
+# the processed range is the previous day
+# and 60 or so days before that to pick up Circular T
+
 mjdToday  = ottp.MJD(time.time())
 stopMJD   = mjdToday - 1 # previous day
-startMJD  = stopMJD - NREGENERATE
-# dailyUpdate = True
+startMJD  = stopMJD - NPREVDAYS
 
+# If an MJD range is manually specified then
+# processing is restricted to that range
 if (args.mjd):
-	dailyUpdate = False
+	
 	if 1 == len(args.mjd):
 		startMJD = int(args.mjd[0])
 		stopMJD  = startMJD
-		if startMJD == mjdToday-1: # FIXME do I need this?
-			dailyUpdate = True
-	elif ( 2 == len(args.mjd)):
+	elif 2 == len(args.mjd):
 		startMJD = int(args.mjd[0])
 		stopMJD  = int(args.mjd[1])
-		if (startMJD == mjdToday - 1) and (stopMJD == mjdToday -1): # FIXME do I need this?
-			dailyUpdate = True
 		if (stopMJD < startMJD):
 			ottp.ErrorExit('Stop MJD is before start MJD')
 	else:
@@ -456,36 +453,32 @@ if 'rinex:path' in cfg:
 	staName = cfg['rinex:station name']
 	rnxVersion = int(cfg['rinex:version'])
 
-if args.utc:
-	
-	updateUTC = True
-	
-else:
-	
-	ottp.Debug(f'Processing range is {startMJD} - {stopMJD}')
-	
-	# Need to get Circular T so that we know the current uncertainty uB
-	# Unfortunately the Web API returns the total uncertainty.
-	# In most cases, and for us, uB dominates so for the moment
-	# we'll use the total uncertainty for uB. Typically, we won't have a matching uB
-	# for an MJD, so we'll just be using the most recent anyway (noting that this will be fixed
-	# later when the UTC update is done)
+ottp.Debug(f'Processing range is {startMJD} - {stopMJD}')
 
-	# Initial guess on range of Circular T to ask for is
-	# [startMJD -7, stopMJD + 7] say
-	
-	cirtStartMJD = startMJD - 7
-	cirtStopMJD  = stopMJD  + 7
-	
-	# The most recent value could be 6 or 7 weeks ago (two weeks into month, previous month not yet available)
-	# It doesn't hurt to get a bit more data than we need so assume the most recent value is 50 days old.
-	
-	if (mjdToday - 50 < cirtStartMJD):
-		cirtStartMJD = mjdToday - 50
+# CircularT data is downloaded each run
+# One year of data is a 2K file so we shouldn't worry too much about 
+# about the load on the web server
+# Need to get Circular T so that we know the current uncertainty uB
+# Unfortunately the Web API returns the total uncertainty.
+# In most cases, and for us, uB dominates so for the moment
+# we'll use the total uncertainty for uB. Typically, we won't have a matching uB
+# for an MJD, so we'll just be using the most recent anyway (noting that this will be fixed
+# later when the UTC update is done)
 
-	cirtAsList,firstMJD,lastMJD = __GetCircularT(lab,cirtStartMJD,cirtStopMJD) #FIXME
-	if not cirtAsList:
-		sys.exit("Couldn't get Circular T")
+# Initial guess on the range of Circular T to ask for is
+# [startMJD -7, stopMJD + 7] say
+
+cirtStartMJD = startMJD - 7
+cirtStopMJD  = stopMJD  + 7
+
+# FIXME when an MJD range is specified, this may need to be extended backwards 
+# to get a reported day
+
+ottp.Debug(f'Getting Circular T for {cirtStartMJD} - {cirtStopMJD}')
+
+cirtAsList,firstMJD,lastMJD = __GetCircularT(lab,cirtStartMJD,cirtStopMJD) #FIXME
+if not cirtAsList:
+	sys.exit("Couldn't get Circular T")
 	
 prevCGGTTSFile = {}
 prevCGGTTSFile['BDS'] = CGGTTS(None,None)
@@ -495,6 +488,29 @@ prevCGGTTSFile['GPS'] = CGGTTS(None,None)
 newData = {}
 
 mjd = startMJD - 2  # start two days earlier because of 1. immediate increment and 2. need the previous day's data
+
+# Connect to the database
+# We can use it to check if UTC fields need to be updated
+ottp.Debug(f'Connecting to the database {db}')
+dbc = sqlite3.connect(db) # this opens a connection to the database, creating the db if it doesn't exist
+curs = dbc.cursor()       #
+# Create the table, if it doesn't exist
+# The primary key for the table is the MJD
+# This has four entries for each GNSS, all kept as unrounded REALs
+# Rounding etc is done when reports are created 
+# UTCk - bUTC_GNSS , u, UTC - buTC_gnss,  u
+# Also keep track of the values uf uA and uB used
+# noting that the WebAPI currently only returns the quadrature sum
+
+curs.execute(
+		"CREATE TABLE IF NOT EXISTS butcgnss ("
+    "MJD INTEGER PRIMARY KEY,"
+    "UTCk_BDS REAL,UTCk_BDS_u REAL,UTC_BDS REAL,UTC_BDS_u REAL,"
+    "UTCk_GAL REAL,UTCk_GAL_u REAL,UTC_GAL REAL,UTC_GAL_u REAL,"
+    "UTCk_GLO REAL,UTCk_GLO_u REAL,UTC_GLO REAL,UTC_GLO_u REAL,"
+    "UTCk_GPS REAL,UTCk_GPS_u REAL,UTC_GPS REAL,UTC_GPS_u REAL,"
+    "UTC_UA REAL,UTC_UB REAL)"
+)
 
 while mjd < stopMJD :
 	mjd += 1 # doing this here means not having to increment multiple times
@@ -584,83 +600,65 @@ while mjd < stopMJD :
 		newData[mjd][g][D_UTCK_BUTC] = refsys0 + deltaUTC
 		newData[mjd][g][U_UTCK_BUTC] = math.sqrt(uRefsys0**2 + uBcirt**2 + U_CAL_GNSS[g]**2 +  U_NAVMSG_GNSS[g]**2) # only uB is relevant here
 		ottp.Debug('UTCk - bUTC {} {:g} {:g} +/- {:g} refsys0={:g} urefsys0={:g}'.format(g,mjd, newData[mjd][g][D_UTCK_BUTC],newData[mjd][g][U_UTCK_BUTC],refsys0,uRefsys0))
-		if updateUTC:
-			mjdLastDigit = int(str(mjd)[-1])
-			if mjdLastDigit < 4:
-				mjd0 = mjd - mjdLastDigit - 1
-				mjd1 = mjd - mjdLastDigit + 4
-			else:
-				mjd0 = mjd - mjdLastDigit + 4
-				mjd1 = mjd - mjdLastDigit + 9
-			if not(mjd0 in cirt) and not(mjd1 in cirt):
-				ottp.Debug(f'{mjd0} and {mjd1} not in CirT')
-				prevCGGTTSFile[g] = cgf
-				continue
-				
-			if not(mjd1 in cirt): # special case: can't interpolate but can do mjd ==  mjd0 and get one more day
-				ottp.Debug(f'{mjd1} not in CirT')
-				if (mjd == mjd0):
-					newData[mjd][g][D_UTC_BUTC] = cirt[mjd][1] + newData[mjd][g][D_UTCK_BUTC]
-					newData[mjd][g][U_UTC_BUTC] = math.sqrt(uRefsys0**2 +  uAcirt**2 + uBcirt**2 + U_CAL_GNSS[g]**2 +  U_NAVMSG_GNSS[g]**2) # no contribution from instability
-					mjdLastupdateUTC = mjd
-				prevCGGTTSFile[g] = cgf # this is correct - we only have mjd0, so we're done after tewsing for mjd==mjd0 
-				continue
+		
+		# Now update UTC - bUTC_GNSS, if we can
+		mjdLastDigit = int(str(mjd)[-1])
+		if mjdLastDigit < 4:
+			mjd0 = mjd - mjdLastDigit - 1
+			mjd1 = mjd - mjdLastDigit + 4
+		else:
+			mjd0 = mjd - mjdLastDigit + 4
+			mjd1 = mjd - mjdLastDigit + 9
+		if not(mjd0 in cirt) and not(mjd1 in cirt):
+			ottp.Debug(f'{mjd0} and {mjd1} not in CirT')
+			prevCGGTTSFile[g] = cgf
+			continue
 			
-			# Don't interpolate on CircularT days - smaller uncertainty
-			# FIMXE this is unnecessary
-			#if (mjd == mjd0 or mjd==mjd1):
-				#gnssData[g][D_UTC_BUTC] = cirt[mjd][1] + gnssData[g][D_UTCK_BUTC]
-				#gnssData[g][U_UTC_BUTC] = math.sqrt(uRefsys0**2 +  uAcirt**2 + uBcirt**2 + U_CAL_GNSS[g]**2 +  U_NAVMSG_GNSS[g]**2) # no contribution from instability
-				#mjdLastupdateUTC = mjd
-				#prevCGGTTSFile[g] = cgf
-				#continue
-				
-			utc0 = cirt[mjd0][1]
-			utc1 = cirt[mjd1][1]	
+		if not(mjd1 in cirt): # special case: can't interpolate but can do mjd ==  mjd0 and get one more day
+			ottp.Debug(f'{mjd1} not in CirT')
+			if (mjd == mjd0):
+				newData[mjd][g][D_UTC_BUTC] = cirt[mjd][1] + newData[mjd][g][D_UTCK_BUTC]
+				newData[mjd][g][U_UTC_BUTC] = math.sqrt(uRefsys0**2 +  uAcirt**2 + uBcirt**2 + U_CAL_GNSS[g]**2 +  U_NAVMSG_GNSS[g]**2) # no contribution from instability
+				mjdLastupdateUTC = mjd
+			prevCGGTTSFile[g] = cgf # this is correct - we only have mjd0, so we're done after tewsing for mjd==mjd0 
+			continue
+		
+		# Don't interpolate on CircularT days - smaller uncertainty
+		# FIMXE this is unnecessary
+		#if (mjd == mjd0 or mjd==mjd1):
+			#gnssData[g][D_UTC_BUTC] = cirt[mjd][1] + gnssData[g][D_UTCK_BUTC]
+			#gnssData[g][U_UTC_BUTC] = math.sqrt(uRefsys0**2 +  uAcirt**2 + uBcirt**2 + U_CAL_GNSS[g]**2 +  U_NAVMSG_GNSS[g]**2) # no contribution from instability
+			#mjdLastupdateUTC = mjd
+			#prevCGGTTSFile[g] = cgf
+			#continue
 			
-			utcDiff,utcInterpUncert = InterpolateUTC(mjd,mjd0,mjd1,cirt)
-			newData[mjd][g][D_UTC_BUTC] = utcDiff + newData[mjd][g][D_UTCK_BUTC]
-			# Uncertainty sources:
-			# time transfer noise == uRefsys0
-			# UTC interpolation uncertainty == utcUncert (which includes the link calibration uncertainty)
-			# UTC(k) instability 
-			# GNSS provider link's calibration uncertainty
-			# UTC prediction 
-			UTCkInstability = ClockStability(clockModel,mjd - mjd0)
-			if  ClockStability(clockModel,mjd - mjd0) <  UTCkInstability:
-				UTCkInstability = ClockStability(clockModel,mjd1- mjd)
-			
-			newData[mjd][g][U_UTC_BUTC] = math.sqrt(uRefsys0**2 + cirt[mjd0][3]**2 + cirt[mjd0][4]**2 + utcInterpUncert**2 +
-					UTCkInstability**2+ U_CAL_GNSS[g]**2 +  U_NAVMSG_GNSS[g]**2) 
+		utc0 = cirt[mjd0][1]
+		utc1 = cirt[mjd1][1]	
+		
+		utcDiff,utcInterpUncert = InterpolateUTC(mjd,mjd0,mjd1,cirt)
+		newData[mjd][g][D_UTC_BUTC] = utcDiff + newData[mjd][g][D_UTCK_BUTC]
+		# Uncertainty sources:
+		# time transfer noise == uRefsys0
+		# UTC interpolation uncertainty == utcUncert (which includes the link calibration uncertainty)
+		# UTC(k) instability 
+		# GNSS provider link's calibration uncertainty
+		# UTC prediction 
+		UTCkInstability = ClockStability(clockModel,mjd - mjd0)
+		if  ClockStability(clockModel,mjd - mjd0) <  UTCkInstability:
+			UTCkInstability = ClockStability(clockModel,mjd1- mjd)
+		
+		newData[mjd][g][U_UTC_BUTC] = math.sqrt(uRefsys0**2 + cirt[mjd0][3]**2 + cirt[mjd0][4]**2 + utcInterpUncert**2 +
+				UTCkInstability**2+ U_CAL_GNSS[g]**2 +  U_NAVMSG_GNSS[g]**2) 
 			
 		prevCGGTTSFile[g] = cgf # save it for the next iteration
 	
 	if (mjd == startMJD):
 		continue
 
-# Finally, update the database
-ottp.Debug(f'Connecting to the database {db}')
-dbc = sqlite3.connect(db) # this opens a connection to the database, creating the db if it doesn't exist
-curs = dbc.cursor()       #
-# Create the table, if it doesn't exist
-# The primary key for the table is the MJD
-# This has four entries for each GNSS, all kept as unrounded REALs
-# Rounding etc is done when reports are created 
-# UTCk - bUTC_GNSS , u, UTC - buTC_gnss,  u
-
-curs.execute(
-		"CREATE TABLE IF NOT EXISTS butcgnss ("
-    "MJD INTEGER PRIMARY KEY,"
-    "UTCk_BDS REAL,UTCk_BDS_u REAL,UTC_BDS REAL,UTC_BDS_u REAL,"
-    "UTCk_GAL REAL,UTCk_GAL_u REAL,UTC_GAL REAL,UTC_GAL_u REAL,"
-    "UTCk_GLO REAL,UTCk_GLO_u REAL,UTC_GLO REAL,UTC_GLO_u REAL,"
-    "UTCk_GPS REAL,UTCk_GPS_u REAL,UTC_GPS REAL,UTC_GPS_u REAL)"
-)
-
 #print(f"SQLite Library Version: {sqlite3.sqlite_version}")
 #print(f"Python sqlite3 Module Version: {sqlite3.version}")
 
-# Update the database
+# Finally, update the database
 for m in newData:
 	# Build an 'upsert' command
 	inscmd = 'INSERT INTO butcgnss (mjd'
@@ -691,5 +689,5 @@ for m in newData:
 dbc.commit()
 curs.close()
 dbc.close()
-    
+  
 ottp.Debug('Done!')
