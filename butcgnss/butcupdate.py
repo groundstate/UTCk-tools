@@ -59,7 +59,7 @@ try:
 except ImportError:
 	sys.exit('ERROR: Must install rinexlib\n eg openttp/software/system/installsys.py -i rinexlib')
 	
-VERSION = '0.9.0'
+VERSION = '0.9.1'
 AUTHORS = 'Michael Wouters'
 
 SQRT2 = math.sqrt(2)
@@ -76,8 +76,6 @@ U_CAL_GNSS = {'BDS': 2.4, 'GAL': 2.4 ,'GLO': 3.8, 'GPS': 2.7}
 # Values from Defraigne et al 2023 Metrologia 60 065010,  DOI : 10.1088/1681-7575/ad0562
 U_NAVMSG_GNSS = {'BDS': 0.2, 'GAL': 0.1 ,'GLO':1.2, 'GPS': 1.3}
 
-CIRT_UA = 0.2            # uA as reported in Circular T
-
 CLOCK_5071_STD = 1 # standard model
 CLOCK_5071_HPT = 2 # high performance model 
 CLOCK_MASER    = 3
@@ -88,6 +86,8 @@ U_UTCK_BUTC = 1
 D_UTC_BUTC  = 2
 U_UTC_BUTC  = 3
 
+CIRT_REF_ISSUE = 421
+CIRT_REF_MJD   = 59944
 
 # ------------------------------------------
 def ShowVersion():
@@ -255,10 +255,12 @@ def GetRefsys(cgBef,cgAft,winSize):
 	return refsys0,math.sqrt(urefsys0/(nTracks-1)),nTracks  # returns std dev as uncertainty for refsys0
 
 # Returns Circular T in a list
+# A current difficulty is that the Web api only returns the total uncertainty
+# For most labs though uA << uB so uB = uTotal
 # ---------------------------------------------
 def __GetCircularT(lab,startMJD,stopMJD):
 	# Code for testing - be kind to the BIPM web server
-	ottp.Debug('Reading local file for CircularT');
+	ottp.Debug('Reading local file for CircularT data')
 	data = []
 	fin = open(os.path.join(root,'reports/cirt.txt'),'r')
 	firstMJD = lastMJD = None
@@ -268,7 +270,7 @@ def __GetCircularT(lab,startMJD,stopMJD):
 		vals = l.strip().split()
 		if (len(vals) == 3):
 			data.append([int(vals[0]),float(vals[1]),float(vals[2]),
-				uACircularT,math.sqrt(float(vals[2])**2 - uACircularT**2 )]) #  TODO when the web API reports (uA,uB)
+				0,math.sqrt(float(vals[2])**2 - 0**2 )]) #  TODO when the web API reports (uA,uB)
 			if not firstMJD:
 				firstMJD = int(vals[0])
 			lastMJD = int(vals[0])
@@ -277,8 +279,8 @@ def __GetCircularT(lab,startMJD,stopMJD):
 
 # ---------------------------------------------
 def GetCircularT(lab,startMJD,stopMJD):
-	ottp.Debug('Fetching Circular T');
-	ottp.Debug(f'{httpRequest}scale=utc&lab={lab}&mjd1={startMJD}&mjd2={stopMJD}&outfile=txt');
+	ottp.Debug('Fetching Circular T data');
+	ottp.Debug(f'{httpRequest}scale=utc&lab={lab}&mjd1={startMJD}&mjd2={stopMJD}&outfile=txt')
 	try:
 		r = requests.get(f'{httpRequest}scale=utc&lab={lab}&mjd1={startMJD}&mjd2={stopMJD}&outfile=txt',verify=rootCert)
 	except:
@@ -296,11 +298,19 @@ def GetCircularT(lab,startMJD,stopMJD):
 		vals = l.strip().split()
 		if (len(vals) == 3):
 			data.append([int(vals[0]),float(vals[1]),float(vals[2]),
-				uACircularT,math.sqrt(float(vals[2])**2 - uACircularT**2 )]) #  TODO when the web API reports (uA,uB)
+				0,math.sqrt(float(vals[2])**2 - 0**2 )]) #  TODO when the web API reports (uA,uB)
 			if not firstMJD:
 				firstMJD = int(vals[0])
 			lastMJD = int(vals[0])
 	return data,firstMJD,lastMJD
+
+# ---------------------------------------------
+def LoadCircularT(lab,startMJD,stopMJD):
+	ottp.Debug('Reading Circular T from local mirror')
+	# Estimate the range of issues to load
+	startIssue = CIRT_REF_ISSUE + int(math.floor((startMJD - CIRT_REF_MJD)/(365.25/12.0)))
+	stopIssue  = CIRT_REF_ISSUE + int(math.ceil((stopMJD - CIRT_REF_MJD)/(365.25/12.0))) # may go one too far but that's OK
+	ottp.Debug(f'{startMJD},{stopMJD}->issues {startIssue},{stopIssue}')
 	
 # ---------------------------------------------
 # This uses the list representation!
@@ -311,7 +321,7 @@ def GetNearestCirtU(cirt,mjd):
 			ottp.Debug(f'{cirt[i][0]} {cirt[i+1][0]} {mjd} {cirt[i][2]} ')
 			return cirt[i][3], cirt[i][4]
 	ottp.Debug(f'{cirt[-1][0]} {mjd} failed -> {cirt[i][3]}  {cirt[i][4]}')
-	return cirt[-1][3],cirt[-1][4]
+	return cirt[-1][3],cirt[-1][4] # not available, use the last known values
 
 # ---------------------------------------------
 # Linear interpolation  of Circular T
@@ -363,7 +373,6 @@ rootCert = None # if you use an empty string, this will skip SSL verification wh
 winSize = REFSYS_AVG_WINDOW
 
 clockModel = CLOCK_5071_STD
-uACircularT = CIRT_UA
 
 if ottp.LibMajorVersion() >= 0 and ottp.LibMinorVersion() < 2: 
 	sys.exit('Need ottplib minor version >= 2')
@@ -436,7 +445,7 @@ if 'main:clock' in cfg:
 	else:
 		ottp.ErrorExit(f"Unknown clock: {cfg['main:clock']}")
 	
-if 'main:circular t ua' in cfg:
+if 'main:circular t ua' in cfg: # The Web API doesn't give us this. We could download Circular T and grab it from that but ... 
 	uACircularT = float(cfg['main:circular t ua'])
 
 if ('main:root certificate' in cfg):
@@ -452,6 +461,31 @@ if 'rinex:path' in cfg:
 		ottp.ErrorExit('Missing entries in configuration file')
 	staName = cfg['rinex:station name']
 	rnxVersion = int(cfg['rinex:version'])
+
+# Connect to the database
+# Do this before we download CircularT because we need uA from the database
+
+ottp.Debug(f'Connecting to the database {db}')
+dbc = sqlite3.connect(db) # this opens a connection to the database, creating the db if it doesn't exist
+curs = dbc.cursor()       #
+
+# Create the table, if it doesn't exist
+# The primary key for the table is the MJD
+# This has four entries for each GNSS, all kept as unrounded REALs
+# Rounding etc is done when reports are created 
+# UTCk - bUTC_GNSS , u, UTC - buTC_gnss,  u
+# Also keep track of the values of uA and uB used
+# noting that the WebAPI currently only returns the quadrature sum
+
+curs.execute(
+		"CREATE TABLE IF NOT EXISTS butcgnss ("
+    "MJD INTEGER PRIMARY KEY,"
+    "UTCk_BDS REAL,UTCk_BDS_u REAL,UTC_BDS REAL,UTC_BDS_u REAL,"
+    "UTCk_GAL REAL,UTCk_GAL_u REAL,UTC_GAL REAL,UTC_GAL_u REAL,"
+    "UTCk_GLO REAL,UTCk_GLO_u REAL,UTC_GLO REAL,UTC_GLO_u REAL,"
+    "UTCk_GPS REAL,UTCk_GPS_u REAL,UTC_GPS REAL,UTC_GPS_u REAL)"
+)
+
 
 ottp.Debug(f'Processing range is {startMJD} - {stopMJD}')
 
@@ -479,7 +513,11 @@ ottp.Debug(f'Getting Circular T for {cirtStartMJD} - {cirtStopMJD}')
 cirtAsList,firstMJD,lastMJD = __GetCircularT(lab,cirtStartMJD,cirtStopMJD) #FIXME
 if not cirtAsList:
 	sys.exit("Couldn't get Circular T")
-	
+# For UTC-bUTC_GNSS it's convenient to have Circular T as a dictionary
+cirt = {}
+for c in cirtAsList:
+	cirt[c[0]] = [c[0],c[1],c[2],c[3],c[4]]
+		
 prevCGGTTSFile = {}
 prevCGGTTSFile['BDS'] = CGGTTS(None,None)
 prevCGGTTSFile['GAL'] = CGGTTS(None,None)
@@ -488,29 +526,6 @@ prevCGGTTSFile['GPS'] = CGGTTS(None,None)
 newData = {}
 
 mjd = startMJD - 2  # start two days earlier because of 1. immediate increment and 2. need the previous day's data
-
-# Connect to the database
-# We can use it to check if UTC fields need to be updated
-ottp.Debug(f'Connecting to the database {db}')
-dbc = sqlite3.connect(db) # this opens a connection to the database, creating the db if it doesn't exist
-curs = dbc.cursor()       #
-# Create the table, if it doesn't exist
-# The primary key for the table is the MJD
-# This has four entries for each GNSS, all kept as unrounded REALs
-# Rounding etc is done when reports are created 
-# UTCk - bUTC_GNSS , u, UTC - buTC_gnss,  u
-# Also keep track of the values uf uA and uB used
-# noting that the WebAPI currently only returns the quadrature sum
-
-curs.execute(
-		"CREATE TABLE IF NOT EXISTS butcgnss ("
-    "MJD INTEGER PRIMARY KEY,"
-    "UTCk_BDS REAL,UTCk_BDS_u REAL,UTC_BDS REAL,UTC_BDS_u REAL,"
-    "UTCk_GAL REAL,UTCk_GAL_u REAL,UTC_GAL REAL,UTC_GAL_u REAL,"
-    "UTCk_GLO REAL,UTCk_GLO_u REAL,UTC_GLO REAL,UTC_GLO_u REAL,"
-    "UTCk_GPS REAL,UTCk_GPS_u REAL,UTC_GPS REAL,UTC_GPS_u REAL,"
-    "UTC_UA REAL,UTC_UB REAL)"
-)
 
 while mjd < stopMJD :
 	mjd += 1 # doing this here means not having to increment multiple times
@@ -545,6 +560,9 @@ while mjd < stopMJD :
 		ottp.Debug("Couldn't find a navigation file for {yyyy} {doy}")
 	
 	newData[mjd] = {} # we get an empty entry first time through but that's OK
+	
+	# 
+	uAcirt,uBcirt = GetNearestCirtU(cirtAsList,mjd)
 	
 	for g in gnss:
 		ottp.Debug(f'Processing {g}')
@@ -594,7 +612,6 @@ while mjd < stopMJD :
 			prevCGGTTSFile[g] = cgf
 			continue
 			
-		uAcirt,uBcirt = GetNearestCirtU(cirtAsList,mjd)
 		deltaUTC = DeltaGNSSUTC(g,Wn,Dn,leapSecs,tsCorr)
 			
 		newData[mjd][g][D_UTCK_BUTC] = refsys0 + deltaUTC
@@ -680,6 +697,7 @@ for m in newData:
 		updatedcols += f'\nUTC_{g}=EXCLUDED.UTC_{g},'
 		updatedcols += f'\nUTC_{g}_u=EXCLUDED.UTC_{g}_u'
 		cnt += 1
+	
 	inscmd += ')\n'
 	valscmd += ')\n'
 
