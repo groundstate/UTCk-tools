@@ -89,6 +89,10 @@ U_UTC_BUTC  = 3
 CIRT_REF_ISSUE = 421
 CIRT_REF_MJD   = 59944
 
+CIRT_WEB_API  = 0
+CIRT_REPORT   = 1
+CIRT_DOWNLOAD = 2
+
 # ------------------------------------------
 def ShowVersion():
 	print (os.path.basename(sys.argv[0])+" "+VERSION)
@@ -254,14 +258,14 @@ def GetRefsys(cgBef,cgAft,winSize):
 	
 	return refsys0,math.sqrt(urefsys0/(nTracks-1)),nTracks  # returns std dev as uncertainty for refsys0
 
-# Returns Circular T in a list
+# Returns Circular T in a dictionary
 # A current difficulty is that the Web api only returns the total uncertainty
 # For most labs though uA << uB so uB = uTotal
 # ---------------------------------------------
-def __GetCircularT(lab,startMJD,stopMJD):
+def LoadUTCk(lab,startMJD,stopMJD):
 	# Code for testing - be kind to the BIPM web server
-	ottp.Debug('Reading local file for CircularT data')
-	data = []
+	ottp.Debug('Reading local file for UTCk data')
+	data = {}
 	fin = open(os.path.join(root,'reports/cirt.txt'),'r')
 	firstMJD = lastMJD = None
 	for l in fin:
@@ -269,8 +273,8 @@ def __GetCircularT(lab,startMJD,stopMJD):
 			continue
 		vals = l.strip().split()
 		if (len(vals) == 3):
-			data.append([int(vals[0]),float(vals[1]),float(vals[2]),
-				0,math.sqrt(float(vals[2])**2 - 0**2 )]) #  TODO when the web API reports (uA,uB)
+			data[int(vals[0])] = [int(vals[0]),float(vals[1]),float(vals[2]),
+				0,math.sqrt(float(vals[2])**2 - 0**2 )] #  TODO when the web API reports (uA,uB)
 			if not firstMJD:
 				firstMJD = int(vals[0])
 			lastMJD = int(vals[0])
@@ -278,8 +282,8 @@ def __GetCircularT(lab,startMJD,stopMJD):
 	return data,firstMJD,lastMJD
 
 # ---------------------------------------------
-def GetCircularT(lab,startMJD,stopMJD):
-	ottp.Debug('Fetching Circular T data');
+def FetchUTCk(lab,startMJD,stopMJD):
+	ottp.Debug(f'Fetching Circular T data for {lab}');
 	ottp.Debug(f'{httpRequest}scale=utc&lab={lab}&mjd1={startMJD}&mjd2={stopMJD}&outfile=txt')
 	try:
 		r = requests.get(f'{httpRequest}scale=utc&lab={lab}&mjd1={startMJD}&mjd2={stopMJD}&outfile=txt',verify=rootCert)
@@ -287,7 +291,7 @@ def GetCircularT(lab,startMJD,stopMJD):
 		return None,None,None
 	
 	lines = r.text.split('\r\n')
-	data = []
+	data = {}
 	firstMJD = lastMJD = None
 	for l in lines:
 		l = l.strip()
@@ -295,10 +299,15 @@ def GetCircularT(lab,startMJD,stopMJD):
 			continue
 		if l[0] == '#':
 			continue
-		vals = l.strip().split()
-		if (len(vals) == 3):
-			data.append([int(vals[0]),float(vals[1]),float(vals[2]),
-				0,math.sqrt(float(vals[2])**2 - 0**2 )]) #  TODO when the web API reports (uA,uB)
+		vals = l.strip().split() 
+		# If there is no data for an MJD, then nothing is returned
+		# If the uncertainty is unavailable, 0 is returned
+		if (len(vals) == 3): # Three values are always returned
+			if vals[2] == '0.0':
+				data[int(vals[0])] = [int(vals[0]),float(vals[1]),None,None,None]
+			else:	
+				data[int(vals[0])] = [int(vals[0]),float(vals[1]),float(vals[2]),
+					0,math.sqrt(float(vals[2])**2 - 0**2 )] #  TODO when the web API reports (uA,uB)
 			if not firstMJD:
 				firstMJD = int(vals[0])
 			lastMJD = int(vals[0])
@@ -311,7 +320,61 @@ def LoadCircularT(lab,startMJD,stopMJD):
 	startIssue = CIRT_REF_ISSUE + int(math.floor((startMJD - CIRT_REF_MJD)/(365.25/12.0)))
 	stopIssue  = CIRT_REF_ISSUE + int(math.ceil((stopMJD - CIRT_REF_MJD)/(365.25/12.0))) # may go one too far but that's OK
 	ottp.Debug(f'{startMJD},{stopMJD}->issues {startIssue},{stopIssue}')
+	utck = {} # using a dictionary gets rid of the duplicates automatically
+	labregex = r'^' + lab
+	firstMJD = lastMJD = None
+	for issue in range(startIssue,stopIssue+1):
+		fName = os.path.join(cirtDir,f'cirt.{issue}')
+		if os.path.exists(fName):
+			ottp.Debug(f'Reading {fName}')
+			fin = open(fName,'r')
+			mjds = []
+			for l in fin:
+				if (re.search(r'uA\s+uB\s+u\s*$',l)):
+					args = l.strip().split()
+					for i in range(1,len(args)-3):
+						#utck[int(args[i])] = [int(args[i]),None,None,None,None]
+						mjds.append(int(args[i]))
+					break
+			if firstMJD == None:
+				firstMJD = mjds[0]
+			lastMJD = mjds[-1]
+			for l in fin:
+				if (re.search(labregex,l)):
+					# Remove lab name and location for ease of parsing
+					indx = l.find(')')
+					ll = l[indx+1:]
+					# Occasionally there are notes at the end, chop these off 
+					# to make parsing easier
+					indx = ll.find('(')
+					if indx:
+						ll = ll[0:indx]
+					cols = ll.strip().split()
+					utckm = []
+					for i in range(0,len(mjds)):
+						if (cols[i] == '-'): # missing data
+							utckm.append(None) # tag for cleanup
+						else:
+							utckm.append(float(cols[i]))
+					
+					# If there is no data then no uncertainties are given in Circular T, logically enough
+					if len(cols) == len(mjds): # no uncertainties are present
+						uncerts = [None,None,None]
+					else:
+						uncerts = []
+						for i in range(len(cols)-3,len(cols)):
+							if (cols[i] == '-' or cols[i] == 'NC'): # missing/uncalibrated data
+								uncerts.append(None)
+							else:
+								uncerts.append(float(cols[i]))
+					for mi in range(len(mjds)):
+						utck[mjds[mi]] = [ mjds[mi], utckm[mi], uncerts[2], uncerts[0],uncerts[1] ]  # note ordering of uncertainties
+					break
+			fin.close()
 	
+	return utck,firstMJD,lastMJD
+
+		
 # ---------------------------------------------
 # This uses the list representation!
 # 0->MJD, 1->UTC-UTCk, 2->u, 3->uA, 4->uB
@@ -320,7 +383,7 @@ def GetNearestCirtU(cirt,mjd):
 		if (cirt[i][0] >= mjd and mjd <= cirt[i+1][0]):
 			ottp.Debug(f'{cirt[i][0]} {cirt[i+1][0]} {mjd} {cirt[i][2]} ')
 			return cirt[i][3], cirt[i][4]
-	ottp.Debug(f'{cirt[-1][0]} {mjd} failed -> {cirt[i][3]}  {cirt[i][4]}')
+	ottp.Debug(f'GetNearestCirtU failed for {mjd}: last MJD = {cirt[-1][0]}, using {cirt[-1][3]}  {cirt[-1][4]}')
 	return cirt[-1][3],cirt[-1][4] # not available, use the last known values
 
 # ---------------------------------------------
@@ -330,7 +393,28 @@ def GetNearestCirtU(cirt,mjd):
 
 def InterpolateUTC(mjd,mjd0,mjd1,cirt):
 	utc0 = cirt[mjd0][1]
-	utc1 = cirt[mjd1][1]	
+	utc1 = cirt[mjd1][1]
+	
+	# Check the boundaries	
+	if utc0 == None:
+		if utc1 == None:
+			ottp.Debug(f'InterpolateUTC: no data for {utc0} and {utc1}') # UNTESTED 
+			return None,None 
+		elif mjd == mjd1:
+			ottp.Debug(f'InterpolateUTC: no data for {utc0} but MJD = {mjd1}, return {cirt[mjd1]} +/- 0')
+			return cirt[mjd1][1],0 # no interpolation uncertainty
+		else:
+			ottp.Debug(f'InterpolateUTC: interpolation failure')
+			return None,None
+			
+	if utc1 == None:
+		if mjd == mjd0:
+			ottp.Debug(f'InterpolateUTC: no data for {utc1} but MJD = {mjd0}, return {cirt[mjd1]} +/- 0') # UNTESTED 
+			return cirt[mjd0][1],0 # no interpolation uncertainty
+		else:
+			ottp.Debug(f'InterpolateUTC: interpolation failure')
+			return None,None
+			
 	dmjd = mjd - mjd0
 	
 	# The uncertainty is calculated by
@@ -364,7 +448,10 @@ configFile = os.path.join(root,'etc/butc.conf')
 rnxDir = os.path.join(root,'rinex')
 tmpDir  = os.path.join(root,'tmp')
 cggttsDir = os.path.join(root,'cggtts')
+cirtDir = os.path.join(root,'cirt')
 db = os.path.join(root,'butcgnss.db')
+cirtSource = CIRT_REPORT 
+nPrevDays = NPREVDAYS
 
 lab = 'AUS'
 httpRequest = 'https://webtai.bipm.org/api/v1.0/get-data.html?'
@@ -383,6 +470,8 @@ parser = argparse.ArgumentParser(description='Generate UTC(k) - bUTC_GNSS and UT
 parser.add_argument('mjd',nargs = '*',help='first MJD [last MJD] (if not given, the MJD of the previous day is used as the last MJD)')
 parser.add_argument('--config','-c',help='use an alternate configuration file',default=configFile)
 parser.add_argument('--debug','-d',help='debug (to stderr)',action='store_true')
+parser.add_argument('--cirt',help='source of data for Circular T (webapi,report,download)')
+parser.add_argument('--nprev',help='number of previous days to process',default=nPrevDays)
 parser.add_argument('--version','-v',help='show version and exit',action='store_true')
 
 args = parser.parse_args()
@@ -396,6 +485,18 @@ if (args.config):
 	if (not os.path.isfile(configFile)):
 		ottp.ErrorExit(configFile + ' not found')
 
+if (args.cirt):
+	if args.cirt == 'webapi':
+		cirtSource = CIRT_WEB_API
+	elif args.cirt == 'report':
+		cirtSource = CIRT_REPORT
+	elif args.cirt == 'download':
+		cirtSource = CIRT_DOWNLOAD
+	else:
+		ottp.ErrorExit(f'Bad option --cirt {args.cirt}')
+
+nPrevDays = int(args.nprev)
+
 debug = args.debug
 ottp.SetDebugging(debug)
 cggtts.SetWarnings(debug)
@@ -406,7 +507,7 @@ cggtts.SetWarnings(debug)
 
 mjdToday  = ottp.MJD(time.time())
 stopMJD   = mjdToday - 1 # previous day
-startMJD  = stopMJD - NPREVDAYS
+startMJD  = stopMJD - nPrevDays
 
 # If an MJD range is manually specified then
 # processing is restricted to that range
@@ -445,9 +546,6 @@ if 'main:clock' in cfg:
 	else:
 		ottp.ErrorExit(f"Unknown clock: {cfg['main:clock']}")
 	
-if 'main:circular t ua' in cfg: # The Web API doesn't give us this. We could download Circular T and grab it from that but ... 
-	uACircularT = float(cfg['main:circular t ua'])
-
 if ('main:root certificate' in cfg):
 	rootCert= cfg['main:root certificate']
 
@@ -508,16 +606,20 @@ cirtStopMJD  = stopMJD  + 7
 # FIXME when an MJD range is specified, this may need to be extended backwards 
 # to get a reported day
 
-ottp.Debug(f'Getting Circular T for {cirtStartMJD} - {cirtStopMJD}')
+ottp.Debug(f'Getting Circular T data for {cirtStartMJD} - {cirtStopMJD}')
 
-cirtAsList,firstMJD,lastMJD = __GetCircularT(lab,cirtStartMJD,cirtStopMJD) #FIXME
-if not cirtAsList:
-	sys.exit("Couldn't get Circular T")
-# For UTC-bUTC_GNSS it's convenient to have Circular T as a dictionary
-cirt = {}
-for c in cirtAsList:
-	cirt[c[0]] = [c[0],c[1],c[2],c[3],c[4]]
-		
+if cirtSource == CIRT_WEB_API:
+	cirt, firstMJD,lastMJD = FetchUTCk(lab,cirtStartMJD,cirtStopMJD)	
+elif cirtSource == CIRT_REPORT:
+	cirt, firstMJD,lastMJD = LoadCircularT(lab,cirtStartMJD,cirtStopMJD)	
+elif cirtSource == CIRT_DOWNLOAD:
+	cirt,firstMJD,lastMJD = LoadUTCk(lab,cirtStartMJD,cirtStopMJD)
+
+if not cirt:
+	sys.exit("Couldn't get Circular T data")
+
+cirtAsList = list(cirt.values())
+
 prevCGGTTSFile = {}
 prevCGGTTSFile['BDS'] = CGGTTS(None,None)
 prevCGGTTSFile['GAL'] = CGGTTS(None,None)
@@ -562,7 +664,7 @@ while mjd < stopMJD :
 	newData[mjd] = {} # we get an empty entry first time through but that's OK
 	
 	# 
-	uAcirt,uBcirt = GetNearestCirtU(cirtAsList,mjd)
+	uAcirt,uBcirt = GetNearestCirtU(cirtAsList,mjd) # could be None
 	
 	for g in gnss:
 		ottp.Debug(f'Processing {g}')
@@ -615,8 +717,12 @@ while mjd < stopMJD :
 		deltaUTC = DeltaGNSSUTC(g,Wn,Dn,leapSecs,tsCorr)
 			
 		newData[mjd][g][D_UTCK_BUTC] = refsys0 + deltaUTC
-		newData[mjd][g][U_UTCK_BUTC] = math.sqrt(uRefsys0**2 + uBcirt**2 + U_CAL_GNSS[g]**2 +  U_NAVMSG_GNSS[g]**2) # only uB is relevant here
-		ottp.Debug('UTCk - bUTC {} {:g} {:g} +/- {:g} refsys0={:g} urefsys0={:g}'.format(g,mjd, newData[mjd][g][D_UTCK_BUTC],newData[mjd][g][U_UTCK_BUTC],refsys0,uRefsys0))
+		if uBcirt == None:
+			newData[mjd][g][U_UTCK_BUTC] = None # UNTESTED
+			ottp.Debug('UTCk - bUTC {} {:g} {:g} +/- ? refsys0={:g} urefsys0={:g}'.format(g,mjd, newData[mjd][g][D_UTCK_BUTC],refsys0,uRefsys0))
+		else:
+			newData[mjd][g][U_UTCK_BUTC] = math.sqrt(uRefsys0**2 + uBcirt**2 + U_CAL_GNSS[g]**2 +  U_NAVMSG_GNSS[g]**2) # only uB is relevant here
+			ottp.Debug('UTCk - bUTC {} {:g} {:g} +/- {:g} refsys0={:g} urefsys0={:g}'.format(g,mjd, newData[mjd][g][D_UTCK_BUTC],newData[mjd][g][U_UTCK_BUTC],refsys0,uRefsys0))
 		
 		# Now update UTC - bUTC_GNSS, if we can
 		mjdLastDigit = int(str(mjd)[-1])
@@ -635,37 +741,35 @@ while mjd < stopMJD :
 			ottp.Debug(f'{mjd1} not in CirT')
 			if (mjd == mjd0):
 				newData[mjd][g][D_UTC_BUTC] = cirt[mjd][1] + newData[mjd][g][D_UTCK_BUTC]
-				newData[mjd][g][U_UTC_BUTC] = math.sqrt(uRefsys0**2 +  uAcirt**2 + uBcirt**2 + U_CAL_GNSS[g]**2 +  U_NAVMSG_GNSS[g]**2) # no contribution from instability
+				if uAcirt == None or uBcirt == None:
+					newData[mjd][g][U_UTC_BUTC] = None # untested
+				else:
+					newData[mjd][g][U_UTC_BUTC] = math.sqrt(uRefsys0**2 +  uAcirt**2 + uBcirt**2 + U_CAL_GNSS[g]**2 +  U_NAVMSG_GNSS[g]**2) # no contribution from instability
 				mjdLastupdateUTC = mjd
 			prevCGGTTSFile[g] = cgf # this is correct - we only have mjd0, so we're done after tewsing for mjd==mjd0 
 			continue
 		
-		# Don't interpolate on CircularT days - smaller uncertainty
-		# FIMXE this is unnecessary
-		#if (mjd == mjd0 or mjd==mjd1):
-			#gnssData[g][D_UTC_BUTC] = cirt[mjd][1] + gnssData[g][D_UTCK_BUTC]
-			#gnssData[g][U_UTC_BUTC] = math.sqrt(uRefsys0**2 +  uAcirt**2 + uBcirt**2 + U_CAL_GNSS[g]**2 +  U_NAVMSG_GNSS[g]**2) # no contribution from instability
-			#mjdLastupdateUTC = mjd
-			#prevCGGTTSFile[g] = cgf
-			#continue
-			
 		utc0 = cirt[mjd0][1]
 		utc1 = cirt[mjd1][1]	
 		
 		utcDiff,utcInterpUncert = InterpolateUTC(mjd,mjd0,mjd1,cirt)
-		newData[mjd][g][D_UTC_BUTC] = utcDiff + newData[mjd][g][D_UTCK_BUTC]
-		# Uncertainty sources:
-		# time transfer noise == uRefsys0
-		# UTC interpolation uncertainty == utcUncert (which includes the link calibration uncertainty)
-		# UTC(k) instability 
-		# GNSS provider link's calibration uncertainty
-		# UTC prediction 
-		UTCkInstability = ClockStability(clockModel,mjd - mjd0)
-		if  ClockStability(clockModel,mjd - mjd0) <  UTCkInstability:
-			UTCkInstability = ClockStability(clockModel,mjd1- mjd)
-		
-		newData[mjd][g][U_UTC_BUTC] = math.sqrt(uRefsys0**2 + cirt[mjd0][3]**2 + cirt[mjd0][4]**2 + utcInterpUncert**2 +
-				UTCkInstability**2+ U_CAL_GNSS[g]**2 +  U_NAVMSG_GNSS[g]**2) 
+		if utcDiff == None:
+			ottp.Debug(f'UTC interpolation failed on [{mjd0},{mjd1}]')
+			newData[mjd][g][D_UTC_BUTC] = None
+		else:
+			newData[mjd][g][D_UTC_BUTC] = utcDiff + newData[mjd][g][D_UTCK_BUTC]
+			# Uncertainty sources:
+			# time transfer noise == uRefsys0
+			# UTC interpolation uncertainty == utcUncert (which includes the link calibration uncertainty)
+			# UTC(k) instability 
+			# GNSS provider link's calibration uncertainty
+			# UTC prediction 
+			UTCkInstability = ClockStability(clockModel,mjd - mjd0)
+			if  ClockStability(clockModel,mjd - mjd0) <  UTCkInstability:
+				UTCkInstability = ClockStability(clockModel,mjd1- mjd)
+			
+			newData[mjd][g][U_UTC_BUTC] = math.sqrt(uRefsys0**2 + cirt[mjd0][3]**2 + cirt[mjd0][4]**2 + utcInterpUncert**2 +
+					UTCkInstability**2+ U_CAL_GNSS[g]**2 +  U_NAVMSG_GNSS[g]**2) 
 			
 		prevCGGTTSFile[g] = cgf # save it for the next iteration
 	
