@@ -71,7 +71,7 @@ def md5sum(filePath):
 	except Exception as e:
 		return f"An error occurred: {e}"
 			
-VERSION = "0.4.1"
+VERSION = "0.4.2"
 AUTHORS = "Michael Wouters"
 
 NCHECK = 10        # number of MJDs to go back for check
@@ -139,6 +139,9 @@ if 'data:tmp directory' in cfg:
 	tmpDir = ottp.MakeAbsolutePath('data:tmp directory',home)	
 prefix = cfg['data:file prefix']
 
+if 'data:upload delay' in cfg:
+	uploadDelay = int(cfg['data:upload delay'])
+											 
 if 'email:sender' in cfg:
 	sender = cfg['email:sender']
 if 'email:recipients' in cfg:
