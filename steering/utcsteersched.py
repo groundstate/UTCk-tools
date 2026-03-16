@@ -65,7 +65,7 @@ sys.path.append("/usr/local/lib/python3.10/site-packages") # Ubuntu 22.04
 
 import ottplib as ottp
 
-VERSION = "1.2.0"
+VERSION = "1.2.1"
 AUTHORS = "Michael Wouters"
 
 UTCR_LATENCY = 3
@@ -592,7 +592,8 @@ else:
 			html += '<div> <strong> NO STEER WILL BE APPLIED </strong> </div>'
 		html += steerMsgs 
 
-html += footer
+if footer:
+	html += footer
 
 html += '<H3>Time offset: UTCr - ' + UTCstr + '</H3>' 
 html += '<img src="cid:offsetplot" alt="phase offset">'
