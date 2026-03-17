@@ -59,7 +59,7 @@ try:
 except ImportError:
 	sys.exit('ERROR: Must install rinexlib\n eg openttp/software/system/installsys.py -i rinexlib')
 	
-VERSION = '0.9.1'
+VERSION = '0.10.0'
 AUTHORS = 'Michael Wouters'
 
 SQRT2 = math.sqrt(2)
@@ -574,6 +574,8 @@ curs = dbc.cursor()       #
 # UTCk - bUTC_GNSS , u, UTC - buTC_gnss,  u
 # Also keep track of the values of uA and uB used
 # noting that the WebAPI currently only returns the quadrature sum
+# The last column is to keep track of new data for UTC-UTC(k)
+# which is not published until manually authorized
 
 curs.execute(
 		"CREATE TABLE IF NOT EXISTS butcgnss ("
@@ -581,9 +583,9 @@ curs.execute(
     "UTCk_BDS REAL,UTCk_BDS_u REAL,UTC_BDS REAL,UTC_BDS_u REAL,"
     "UTCk_GAL REAL,UTCk_GAL_u REAL,UTC_GAL REAL,UTC_GAL_u REAL,"
     "UTCk_GLO REAL,UTCk_GLO_u REAL,UTC_GLO REAL,UTC_GLO_u REAL,"
-    "UTCk_GPS REAL,UTCk_GPS_u REAL,UTC_GPS REAL,UTC_GPS_u REAL)"
+    "UTCk_GPS REAL,UTCk_GPS_u REAL,UTC_GPS REAL,UTC_GPS_u REAL,"
+		"UTC_UPDATED INTEGER)"
 )
-
 
 ottp.Debug(f'Processing range is {startMJD} - {stopMJD}')
 
@@ -780,13 +782,32 @@ while mjd < stopMJD :
 #print(f"Python sqlite3 Module Version: {sqlite3.version}")
 
 # Finally, update the database
+
+updatedMJDs = [] # keep track of MJDs for which there is new UTC data
+
 for m in newData:
 	# Build an 'upsert' command
 	inscmd = 'INSERT INTO butcgnss (mjd'
 	valscmd = f'VALUES ({m}'
 	updatedcols = ''
 	cnt = 0
+
+		
 	for g in gnss:
+		# Query the database for a new value of UTC - UTC(k)
+		# We need to do this for each GNSS since there may not have been NAV data for a particular GNSS
+		
+		r = curs.execute(f'SELECT UTC_{g} from butcgnss where MJD={m};')
+		x = r.fetchone()
+		if x:
+			if (x[0] == None) and not(newData[m][g][2] == None): # not updated yet
+				if not m in updatedMJDs:
+					updatedMJDs.append(m)
+		else: # no entry in database yet
+			if not(newData[m][g][2] == None):
+				if not m in updatedMJDs:
+					updatedMJDs.append(m)
+					
 		inscmd += f',UTCk_{g},UTCk_{g}_u,UTC_{g},UTC_{g}_u'
 		for i in range(0,4):
 			if newData[m][g][i] == None:
@@ -802,6 +823,10 @@ for m in newData:
 		updatedcols += f'\nUTC_{g}_u=EXCLUDED.UTC_{g}_u'
 		cnt += 1
 	
+	if m in updatedMJDs:
+		valscmd += ',1'
+		inscmd  += ',UTC_UPDATED' 
+		
 	inscmd += ')\n'
 	valscmd += ')\n'
 
@@ -811,5 +836,5 @@ for m in newData:
 dbc.commit()
 curs.close()
 dbc.close()
-  
+
 ottp.Debug('Done!')
