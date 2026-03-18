@@ -59,7 +59,7 @@ try:
 except ImportError:
 	sys.exit('ERROR: Must install rinexlib\n eg openttp/software/system/installsys.py -i rinexlib')
 	
-VERSION = '0.10.0'
+VERSION = '0.11.0'
 AUTHORS = 'Michael Wouters'
 
 SQRT2 = math.sqrt(2)
@@ -262,9 +262,9 @@ def GetRefsys(cgBef,cgAft,winSize):
 # A current difficulty is that the Web api only returns the total uncertainty
 # For most labs though uA << uB so uB = uTotal
 # ---------------------------------------------
-def LoadUTCk(lab,startMJD,stopMJD):
+def FetchUTCkLocal(lab,startMJD,stopMJD):
 	# Code for testing - be kind to the BIPM web server
-	ottp.Debug('Reading local file for UTCk data')
+	ottp.Debug(f'Fetching Circular T data for {lab} from local file');
 	data = {}
 	fin = open(os.path.join(root,'reports/cirt.txt'),'r')
 	firstMJD = lastMJD = None
@@ -282,8 +282,8 @@ def LoadUTCk(lab,startMJD,stopMJD):
 	return data,firstMJD,lastMJD
 
 # ---------------------------------------------
-def FetchUTCk(lab,startMJD,stopMJD):
-	ottp.Debug(f'Fetching Circular T data for {lab}');
+def FetchUTCkRemote(lab,startMJD,stopMJD):
+	ottp.Debug(f'Fetching Circular T data for {lab} from BIPM');
 	ottp.Debug(f'{httpRequest}scale=utc&lab={lab}&mjd1={startMJD}&mjd2={stopMJD}&outfile=txt')
 	try:
 		r = requests.get(f'{httpRequest}scale=utc&lab={lab}&mjd1={startMJD}&mjd2={stopMJD}&outfile=txt',verify=rootCert)
@@ -314,8 +314,13 @@ def FetchUTCk(lab,startMJD,stopMJD):
 	return data,firstMJD,lastMJD
 
 # ---------------------------------------------
-def LoadCircularT(lab,startMJD,stopMJD):
-	ottp.Debug('Reading Circular T from local mirror')
+def ReadCircularT(lab,startMJD,stopMJD):
+	
+	# Circular T format as described in
+	# https://https://webtai.bipm.org/ftp/pub/tai/other-products/notes/cirt_format_v0.3.txt
+	#
+	
+	ottp.Debug(f'Reading Circular T data from local mirror for {lab}')
 	# Estimate the range of issues to load
 	startIssue = CIRT_REF_ISSUE + int(math.floor((startMJD - CIRT_REF_MJD)/(365.25/12.0)))
 	stopIssue  = CIRT_REF_ISSUE + int(math.ceil((stopMJD - CIRT_REF_MJD)/(365.25/12.0))) # may go one too far but that's OK
@@ -330,8 +335,8 @@ def LoadCircularT(lab,startMJD,stopMJD):
 			fin = open(fName,'r')
 			mjds = []
 			for l in fin:
-				if (re.search(r'uA\s+uB\s+u\s*$',l)):
-					args = l.strip().split()
+				if (re.search(r'uA\s+uB\s+u\s*$',l)): # this line contains MJDs
+					args = l.strip().split() # format guarantees whitespace between all of the fields so it's safe to do this
 					for i in range(1,len(args)-3):
 						#utck[int(args[i])] = [int(args[i]),None,None,None,None]
 						mjds.append(int(args[i]))
@@ -341,32 +346,22 @@ def LoadCircularT(lab,startMJD,stopMJD):
 			lastMJD = mjds[-1]
 			for l in fin:
 				if (re.search(labregex,l)):
-					# Remove lab name and location for ease of parsing
-					indx = l.find(')')
-					ll = l[indx+1:]
-					# Occasionally there are notes at the end, chop these off 
-					# to make parsing easier
-					indx = ll.find('(')
-					if indx:
-						ll = ll[0:indx]
-					cols = ll.strip().split()
+					# Read the UTC-UTCk values
 					utckm = []
-					for i in range(0,len(mjds)):
-						if (cols[i] == '-'): # missing data
-							utckm.append(None) # tag for cleanup
+					N = len(mjds)
+					for i in range(0,N):
+						utcki = l[26+9*i:33+9*i+1].strip() # subtract '1' from column in BIPM spec since they don't use zero indexing
+						if utcki == '-':
+							utckm.append(None)
 						else:
-							utckm.append(float(cols[i]))
-					
-					# If there is no data then no uncertainties are given in Circular T, logically enough
-					if len(cols) == len(mjds): # no uncertainties are present
-						uncerts = [None,None,None]
-					else:
-						uncerts = []
-						for i in range(len(cols)-3,len(cols)):
-							if (cols[i] == '-' or cols[i] == 'NC'): # missing/uncalibrated data
-								uncerts.append(None)
-							else:
-								uncerts.append(float(cols[i]))
+							utckm.append(float(utcki))
+							
+					uncerts = [None,None,None] # [uA,uB,u]
+					for i in range (0,3):
+						ui = l[27 + 9*N + 6*i : 31 + 9*N + 6*i +1].strip()
+						if not(ui == '-' or ui == 'NC' or ui == ''):
+							uncerts[i] = float(ui)
+						
 					for mi in range(len(mjds)):
 						utck[mjds[mi]] = [ mjds[mi], utckm[mi], uncerts[2], uncerts[0],uncerts[1] ]  # note ordering of uncertainties
 					break
@@ -584,7 +579,7 @@ curs.execute(
     "UTCk_GAL REAL,UTCk_GAL_u REAL,UTC_GAL REAL,UTC_GAL_u REAL,"
     "UTCk_GLO REAL,UTCk_GLO_u REAL,UTC_GLO REAL,UTC_GLO_u REAL,"
     "UTCk_GPS REAL,UTCk_GPS_u REAL,UTC_GPS REAL,UTC_GPS_u REAL,"
-		"UTC_UPDATED INTEGER)"
+		"EMBARGOED INTEGER)"
 )
 
 ottp.Debug(f'Processing range is {startMJD} - {stopMJD}')
@@ -611,11 +606,11 @@ cirtStopMJD  = stopMJD  + 7
 ottp.Debug(f'Getting Circular T data for {cirtStartMJD} - {cirtStopMJD}')
 
 if cirtSource == CIRT_WEB_API:
-	cirt, firstMJD,lastMJD = FetchUTCk(lab,cirtStartMJD,cirtStopMJD)	
+	cirt, firstMJD,lastMJD = FetchUTCkRemote(lab,cirtStartMJD,cirtStopMJD)	
 elif cirtSource == CIRT_REPORT:
-	cirt, firstMJD,lastMJD = LoadCircularT(lab,cirtStartMJD,cirtStopMJD)	
+	cirt, firstMJD,lastMJD = ReadCircularT(lab,cirtStartMJD,cirtStopMJD)	
 elif cirtSource == CIRT_DOWNLOAD:
-	cirt,firstMJD,lastMJD = LoadUTCk(lab,cirtStartMJD,cirtStopMJD)
+	cirt,firstMJD,lastMJD = FetchUTCkLocal(lab,cirtStartMJD,cirtStopMJD)
 
 if not cirt:
 	sys.exit("Couldn't get Circular T data")
@@ -825,7 +820,7 @@ for m in newData:
 	
 	if m in updatedMJDs:
 		valscmd += ',1'
-		inscmd  += ',UTC_UPDATED' 
+		inscmd  += ',EMBARGOED' 
 		
 	inscmd += ')\n'
 	valscmd += ')\n'
