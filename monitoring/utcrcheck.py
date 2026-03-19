@@ -71,7 +71,7 @@ def md5sum(filePath):
 	except Exception as e:
 		return f"An error occurred: {e}"
 			
-VERSION = "0.5.0"
+VERSION = "0.5.1"
 AUTHORS = "Michael Wouters"
 
 NCHECK = 10        # number of MJDs to go back for check
@@ -89,6 +89,7 @@ tmpDir = os.path.join(home,'tmp')
 recipients = 'time@measurement.gov.au'
 sender = recipients
 email = False
+plotfile = None
 footer = None
 uploadDelay = 1 
 
@@ -339,12 +340,13 @@ if email:
 
 	body = MIMEText(html,'html')
 	msg.attach(body)
-
-	fp = open(plotfile,'rb')
-	msgImage = MIMEImage(fp.read())
-	fp.close()
-	msgImage.add_header('Content-ID', '<utcrclocks>')
-	msg.attach(msgImage)
+	
+	if plotfile:
+		fp = open(plotfile,'rb')
+		msgImage = MIMEImage(fp.read())
+		fp.close()
+		msgImage.add_header('Content-ID', '<utcrclocks>')
+		msg.attach(msgImage)
 	
 	# Send the message via local SMTP server.
 	s = smtplib.SMTP(SMTPserver)
