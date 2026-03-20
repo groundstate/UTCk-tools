@@ -59,7 +59,7 @@ try:
 except ImportError:
 	sys.exit('ERROR: Must install rinexlib\n eg openttp/software/system/installsys.py -i rinexlib')
 	
-VERSION = '0.11.0'
+VERSION = '0.12.0'
 AUTHORS = 'Michael Wouters'
 
 SQRT2 = math.sqrt(2)
@@ -579,7 +579,7 @@ curs.execute(
     "UTCk_GAL REAL,UTCk_GAL_u REAL,UTC_GAL REAL,UTC_GAL_u REAL,"
     "UTCk_GLO REAL,UTCk_GLO_u REAL,UTC_GLO REAL,UTC_GLO_u REAL,"
     "UTCk_GPS REAL,UTCk_GPS_u REAL,UTC_GPS REAL,UTC_GPS_u REAL,"
-		"EMBARGOED INTEGER)"
+		"RELEASE_UTC INTEGER)"
 )
 
 ottp.Debug(f'Processing range is {startMJD} - {stopMJD}')
@@ -819,9 +819,9 @@ for m in newData:
 		cnt += 1
 	
 	if m in updatedMJDs:
-		valscmd += ',1'
-		inscmd  += ',EMBARGOED' 
-		
+		valscmd += ',0'
+		inscmd  += ',RELEASE_UTC' 
+	
 	inscmd += ')\n'
 	valscmd += ')\n'
 
