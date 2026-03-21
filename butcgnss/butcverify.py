@@ -25,7 +25,9 @@
 #
 
 import argparse
+import json
 import os
+import requests
 import sys
 
 try:
@@ -42,9 +44,32 @@ def ShowVersion():
 	print ('Written by ' + AUTHORS)
 	return
 
+# ---------------------------------------------
+def FetchBUTC(gnss,startMJD,stopMJD):
+	ottp.Debug(f'Fetching Circular bUTC prediction data  for {gnss} from BIPM');
+	req = f'{httpRequest}scale=b_{gnss}&mjd1={startMJD}&mjd2={stopMJD}&outfile=json'
+	ottp.Debug(req)
+	try:
+		r = requests.get(req,verify=rootCert)
+	except:
+		ottp.Debug('http request failed')
+		return None,None,None
+	
+	d = json.loads(r.text)
+	if not(d['errorcode'] == 0):
+		ottp.Debug(f'http request return error {d['errorcode']}')
+		return None,None,None
+	
+	#data = [[m,b,u] for m,b,u in zip(d['data'][0]['x'],d['data'][0]['y'],d['data'][0]['unc'])]
+
+	return d['data'][0]['x'],d['data'][0]['y'],d['data'][0]['unc']
+	
 # ----------------------------------------------------------------------------------
 home =os.environ['HOME']
 root = home
+
+httpRequest = 'https://webtai.bipm.org/api/v1.0/get-data.html?'
+rootCert = None # if you use an empty string, this will skip SSL verification which is a bad thing
 
 configFile = os.path.join(root,'etc/butc.conf')
 tmpDir  = os.path.join(root,'tmp')
@@ -53,7 +78,7 @@ if ottp.LibMajorVersion() >= 0 and ottp.LibMinorVersion() < 2:
 	sys.exit('Need ottplib minor version >= 2')
 
 examples='TO DO'
-parser = argparse.ArgumentParser(description='Verifies a  monthly report, using data published in Circular T',
+parser = argparse.ArgumentParser(description='Provides information for checking a monthly report',
 	formatter_class=argparse.RawDescriptionHelpFormatter,epilog=examples)
 parser.add_argument('--config','-c',help='use an alternate configuration file',default=configFile)
 parser.add_argument('--debug','-d',help='debug (to stderr)',action='store_true')
@@ -72,3 +97,17 @@ if (args.config):
 
 debug = args.debug
 ottp.SetDebugging(debug)
+
+cfg=ottp.Initialise(configFile,['main:gnss'])
+
+gnss = cfg['main:gnss'].split(',')
+gnss = [g.strip() for g in gnss] 
+
+if ('main:root certificate' in cfg):
+	rootCert= cfg['main:root certificate']
+
+# Make a plot for each GNSS
+for g in gnss:
+	m,d,u = FetchBUTC(g,60100,60110)  # nb u is string!
+	
+	
