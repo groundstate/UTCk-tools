@@ -33,12 +33,17 @@ import os
 import sqlite3
 import sys
 
+# This is where cggttslib is installed
+sys.path.append("/usr/local/lib/python3.8/site-packages")  # Ubuntu 20.04
+sys.path.append("/usr/local/lib/python3.10/site-packages") # Ubuntu 22.04
+sys.path.append("/usr/local/lib/python3.12/site-packages") # Ubuntu 24.04
+
 try:
 	import ottplib   as ottp
 except ImportError:
 	sys.exit('ERROR: Must install ottplib\n eg openttp/software/system/installsys.py -i ottplib')
 
-VERSION = '0.0.1'
+VERSION = '0.0.2'
 AUTHORS = 'Michael Wouters'
 
 MIN_UTCK_U = 5
@@ -111,7 +116,7 @@ header = os.path.join(root,'etc/butcgnss_header.txt')
 if ottp.LibMajorVersion() >= 0 and ottp.LibMinorVersion() < 2: 
 	sys.exit('Need ottplib minor version >= 2')
 
-examples='TO DO'
+examples='EXAMPLES TO DO'
 parser = argparse.ArgumentParser(description='Updates the monthly report',
 	formatter_class=argparse.RawDescriptionHelpFormatter,epilog=examples)
 parser.add_argument('--config','-c',help='use an alternate configuration file',default=configFile)
@@ -157,18 +162,35 @@ if ('database:file' in cfg):
 dt   = datetime.now(tz=timezone.utc) # get date in UTC
 mm   = dt.month
 yyyy = dt.year
-		
+dd   = dt.day
+
+mmStart = mm - 2 # need to check the previous two months
+yyyyStart = yyyy
+if mmStart <= 0:
+	mmStart += 12
+	yyStart = yyyy - 1
+	
+mmStop = mm
+yyyyStop = yyyy
+lastDayOfMonth = dd -1 # for the current month, yesterday
+
 if args.year:
 	if not args.month:
 		ottp.ErrorExit('You need to specify the month as well (--month 1..12)')
 
-if args.month: # manually specified 
+if args.month: # manually specified a single month 
 	if args.year:
 		yyyy = int(args.year)
 	mm = int(args.month)
-	
-startMJD = ottp.MJD(datetime(yyyy,mm,1,0,0,0,tzinfo=timezone.utc).timestamp())
-stopMJD =  startMJD + calendar.monthrange(yyyy,mm)[1] - 1
+	mmStart = mm
+	yyyyStart = yyyy
+	mmStop = mm
+	yyyyStop = yyyy
+
+ottp.Debug(f'{mmStart} {yyyyStart},{mmStop} {yyyyStop}')
+
+startMJD = ottp.MJD(datetime(yyyyStart,mmStart,1,0,0,0,tzinfo=timezone.utc).timestamp())
+stopMJD =  ottp.MJD(datetime(yyyyStop,mmStop,lastDayOfMonth,0,0,0,tzinfo=timezone.utc).timestamp())
 
 ottp.Debug(f'Processing for {startMJD} to {stopMJD}')
 
@@ -186,26 +208,32 @@ for g in gnss:
 		minUncerts[g][0] = float(cfg[gl+':utck uncertainty'])
 	if gl+':utc uncertainty' in cfg:
 		minUncerts[g][1] = float(cfg[gl+':utc uncertainty'])
-		
+
+mmLast = -1
+
 for m in range(startMJD,stopMJD+1):
 	
 	ts = (m - 40587)*86400 # convert MJD to UNIX time
 	dt = datetime.fromtimestamp(ts, tz=timezone.utc) # get date in UTC
 	
+	if not(dt.month == mmLast):
+		ottp.Debug('New month')
+		mmLast = dt.month
+		
 	outputLine = f'{dt.year:4d}-{dt.month:02d}-{dt.day:02d} {m:5d} ' # 17 characters
 	
 	for gi in range(0,len(gnss)):
 		g = gnss[gi]
-		r = curs.execute(f'SELECT UTCk_{g},UTCk_{g}_u,UTC_{g},UTC_{g}_u from butcgnss where MJD={m};')
+		r = curs.execute(f'SELECT UTCk_{g},UTCk_{g}_u,UTC_{g},UTC_{g}_u,release_utc from butcgnss where MJD={m};')
 		x = r.fetchone()
 		
 		if x:
-			minUTCkUncertainty = minUncerts[g][0]*10
+			minUTCkUncertainty = minUncerts[g][0]
 			minUTCUncertainty  = minUncerts[g][1]
 			
 			if x[0]==None: # no data
 				outputLine += f'{missingData:>9}{missingData:>5}{missingData:>9}{missingData:>5}'
-			elif x[2]==None: # no UTC data
+			elif x[4]==None or x[2] == 0: # no UTC data, or not cleared for release
 				reportedUTCkUncert = x[1]
 				if reportedUTCkUncert  < minUTCkUncertainty:
 					reportedUTCkUncert = minUTCkUncertainty
