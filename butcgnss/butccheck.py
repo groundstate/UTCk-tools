@@ -31,16 +31,20 @@ from datetime import timezone
 import json
 import numpy as np
 import os
+from pathlib import Path
 import requests
 import sqlite3
 import sys
 
+import smtplib
+from email.message import EmailMessage
+
 try:
-	import ottplib   as ottp
+	import ottplib as ottp
 except ImportError:
 	sys.exit('ERROR: Must install ottplib\n eg openttp/software/system/installsys.py -i ottplib')
 
-VERSION = '0.0.1'
+VERSION = '0.1.0'
 AUTHORS = 'Michael Wouters'
 
 # ------------------------------------------
@@ -67,10 +71,8 @@ def FetchBIPMBUTC(gnss,startMJD,stopMJD):
 		#return None,None,None
 	
 	#TEMPORARY CODE
-	with open('/home/mjw/database/butc_gps.json', 'r', encoding='utf-8') as file:
+	with open(os.path.join(home,'database/butc_gps.json'), 'r', encoding='utf-8') as file:
 		d = json.load(file)
-    
-	#data = [[m,b,u] for m,b,u in zip(d['data'][0]['x'],d['data'][0]['y'],d['data'][0]['unc'])]
 
 	return np.array(d['data'][0]['x']),np.array(d['data'][0]['y']),np.array(d['data'][0]['unc'],dtype=float)
 
@@ -101,6 +103,12 @@ root = home
 
 httpRequest = 'https://webtai.bipm.org/api/v1.0/get-data.html?'
 rootCert = None # if you use an empty string, this will skip SSL verification which is a bad thing
+
+emailRecipients = 'time@measurement.gov.au'
+emailSender = 'time@measurement.gov.au'
+SMTPserver = 'localhost'
+
+checkingPath = os.path.join(root,'report/checking')
 
 configFile = os.path.join(root,'etc/butc.conf')
 tmpDir  = os.path.join(root,'tmp')
@@ -141,29 +149,46 @@ if (args.config):
 debug = args.debug
 ottp.SetDebugging(debug)
 
-cfg=ottp.Initialise(configFile,['main:gnss'])
+cfg=ottp.Initialise(configFile,['main:gnss','checking:path'])
 
 gnss = cfg['main:gnss'].split(',')
 gnss = [g.strip() for g in gnss] 
 
+checkingPath = ottp.MakeAbsolutePath(cfg['checking:path'],root)
+
+if ('main:email recipients' in cfg):
+	recipients = cfg['main:email recipients']
+
+if ('main:email sender' in cfg):
+	emailSender = cfg['main:email sender']
+
+if ('main:smtp server' in cfg):
+	SMTPserver = cfg['main:smtp server']
+
+if ('main:root certificate' in cfg):
+	rootCert= cfg['main:root certificate']
+	
 if ('database:file' in cfg):
 	db = ottp.MakeAbsoluteFilePath(cfg['database:file'],root,os.path.join(home,'database'))
-
 
 dt   = datetime.now(tz=timezone.utc) # get date in UTC
 mm   = dt.month
 yyyy = dt.year
 dd   = dt.day
 
-mmStart = mm - 2 # need to check the previous two months
+mmStart = mm - 3 # need to check the previous two months
 yyyyStart = yyyy
 if mmStart <= 0:
 	mmStart += 12
-	yyStart = yyyy - 1
+	yyyyStart = yyyy - 1
 	
-mmStop = mm
+mmStop = mm - 1 
 yyyyStop = yyyy
-lastDayOfMonth = dd -1 # for the current month, yesterday
+if mmStop <= 0:
+	mmStop += 12
+	yyyyStop = yyyy - 1
+	
+_,lastDayOfMonth = calendar.monthrange(yyyyStop,mmStop)
 
 if args.year:
 	if not args.month:
@@ -186,10 +211,6 @@ stopMJD =  ottp.MJD(datetime(yyyyStop,mmStop,lastDayOfMonth,0,0,0,tzinfo=timezon
 
 ottp.Debug(f'Processing for {startMJD} to {stopMJD}')
 
-if ('main:root certificate' in cfg):
-	rootCert= cfg['main:root certificate']
-
-
 # Make a plot for each GNSS
 # One page should be fine
 fig, axs = plt.subplots(len(gnss),1,figsize=[8,12],squeeze=False) #unsqueeze so we always get an array of axes
@@ -200,7 +221,7 @@ fig.suptitle(title,ha='left',x=0.1)
 plotIndex = 0
 
 for g in gnss:
-	m,d,u = FetchBIPMBUTC(g,startMJD,stopMJD)  # nb u is string!
+	m,d,u = FetchBIPMBUTC(g,startMJD,stopMJD) 
 	
 	axs[plotIndex,0].fill_between(m,d-u,d+u,color='palegreen')
 	axs[plotIndex,0].plot(m,d,color='g')
@@ -221,8 +242,28 @@ for g in gnss:
 	
 	plotIndex += 1
 
+plotFile = os.path.join(checkingPath,f'checkplots_{yyyyStop}{mmStop:02d}.pdf')
+plt.savefig(plotFile,format='pdf',) # do this before show()
+
 if args.email:
-	pass
+	
+	msg =  EmailMessage()
+	msg['Subject'] = 'bUTC_GNSS checking data for ' + calendar.month_name[mmStop]+ f' {yyyyStop}'
+	msg['From'] = emailSender
+	msg['To'] = emailRecipients
+	msg['Reply-To'] = emailSender
+
+	msg.set_content('Save the attachments ...')
+	
+	# Add attachments
+	with open(plotFile,'rb') as fin:
+		fData = fin.read()
+		msg.add_attachment(fData,maintype='application',subtype='pdf',filename=Path(plotFile).name)
+		
+	# Send the message via local SMTP server.
+	s = smtplib.SMTP(SMTPserver)
+	s.sendmail(emailSender,emailRecipients.split(','), msg.as_string())
+	s.quit()
 	
 if args.display:
 	plt.show()
