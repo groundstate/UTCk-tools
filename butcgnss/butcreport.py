@@ -43,7 +43,7 @@ try:
 except ImportError:
 	sys.exit('ERROR: Must install ottplib\n eg openttp/software/system/installsys.py -i ottplib')
 
-VERSION = '0.0.2'
+VERSION = '0.1.0'
 AUTHORS = 'Michael Wouters'
 
 MIN_UTCK_U = 5
@@ -109,6 +109,7 @@ root = home
 
 configFile = os.path.join(root,'etc/butc.conf')
 tmpDir  = os.path.join(root,'tmp')
+reportDir = os.path.join(root,'reports')
 
 footer = os.path.join(root,'etc/butcgnss_footer.txt')
 header = os.path.join(root,'etc/butcgnss_header.txt')
@@ -150,11 +151,14 @@ if 'main:root' in cfg:
 if 'main:lab' in cfg:
 	lab = cfg['main:lab']
 
-if 'report:footer' in cfg:
-	footer = ottp.MakeAbsoluteFilePath(cfg['report:footer'],root,footer)
+if 'reports:path' in cfg:
+	reportDir = ottp.MakeAbsolutePath(cfg['reports:path'],root)
+	
+if 'reports:footer' in cfg:
+	footer = ottp.MakeAbsoluteFilePath(cfg['reports:footer'],root,footer)
 
-if 'report:header' in cfg:
-	header = ottp.MakeAbsoluteFilePath(cfg['report:header'],root,header)
+if 'reports:header' in cfg:
+	header = ottp.MakeAbsoluteFilePath(cfg['reports:header'],root,header)
 	
 if ('database:file' in cfg):
 	db = ottp.MakeAbsoluteFilePath(cfg['database:file'],root,os.path.join(home,'database'))
@@ -210,6 +214,7 @@ for g in gnss:
 		minUncerts[g][1] = float(cfg[gl+':utc uncertainty'])
 
 mmLast = -1
+currReport = None
 
 for m in range(startMJD,stopMJD+1):
 	
@@ -217,8 +222,23 @@ for m in range(startMJD,stopMJD+1):
 	dt = datetime.fromtimestamp(ts, tz=timezone.utc) # get date in UTC
 	
 	if not(dt.month == mmLast):
-		ottp.Debug('New month')
+		
 		mmLast = dt.month
+		# calendar.month_name[mmStop]
+		if currReport:
+			WriteFooter(currReport,footer)
+			currReport.close()
+		
+		ottp.Debug('New month')
+		
+		reportName = os.path.join(reportDir,f'butc{dt.month:02d}{dt.year:4d}.txt')
+		ottp.Debug(f'Creating report {reportName}')
+		try:
+			currReport = open(reportName,"w")
+		except:
+			sys.exit(f"Couldn't open {reportName}")
+		
+		WriteHeader(currReport,header,dt.month,dt.year)
 		
 	outputLine = f'{dt.year:4d}-{dt.month:02d}-{dt.day:02d} {m:5d} ' # 17 characters
 	
@@ -252,11 +272,16 @@ for m in range(startMJD,stopMJD+1):
 		if gi < len(gnss):
 				outputLine += ' '
 				
-	print(outputLine)
-
+	ottp.Debug(outputLine)
+	currReport.write(outputLine+'\n')
+	
 curs.close()
 dbc.close()
 
+if currReport:
+	WriteFooter(currReport,footer)
+	currReport.close()
+	
 currReport = None
 if currReport:
 	WriteFooter(currReport,footer)
