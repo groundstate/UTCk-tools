@@ -65,7 +65,7 @@ sys.path.append("/usr/local/lib/python3.10/site-packages") # Ubuntu 22.04
 
 import ottplib as ottp
 
-VERSION = "1.2.1"
+VERSION = "1.2.2"
 AUTHORS = "Michael Wouters"
 
 UTCR_LATENCY = 3
@@ -147,7 +147,7 @@ if ('main:utc id' in cfg):
 	UTCID = cfg['main:utc id']
 
 if ('main:email recipients' in cfg):
-	recipients = cfg['main:email recipients']
+	emailRecipients = cfg['main:email recipients']
 
 if ('main:email sender' in cfg):
 	emailSender = cfg['main:email sender']
