@@ -67,7 +67,7 @@ def FetchBIPMBUTC(gnss,startMJD,stopMJD):
 		#return None,None,None
 	
 	#TEMPORARY CODE
-	with open('/home/michael/database/butc_gps.json', 'r', encoding='utf-8') as file:
+	with open('/home/mjw/database/butc_gps.json', 'r', encoding='utf-8') as file:
 		d = json.load(file)
     
 	#data = [[m,b,u] for m,b,u in zip(d['data'][0]['x'],d['data'][0]['y'],d['data'][0]['unc'])]
@@ -75,9 +75,9 @@ def FetchBIPMBUTC(gnss,startMJD,stopMJD):
 	return np.array(d['data'][0]['x']),np.array(d['data'][0]['y']),np.array(d['data'][0]['unc'],dtype=float)
 
 def ReadLabBUTC(db,g,startMJD,stopMJD):
-	mjd = []
-	d   = []
-	u   = []
+	m  = []
+	d  = []
+	u  = []
 	ottp.Debug(f'Connecting to the database {db}')
 	dbc = sqlite3.connect(db) # this opens a connection to the database
 	curs = dbc.cursor()   
@@ -87,11 +87,12 @@ def ReadLabBUTC(db,g,startMJD,stopMJD):
 		x = r.fetchone()
 		if x:
 			if not (x[0] == None):
-				mjd.append(m)
+				m.append(mjd)
 				d.append(x[0])
 				u.append(x[1])
 	curs.close()
 	dbc.close()
+
 	return np.array(m),np.array(d),np.array(u)
 	 
 # ----------------------------------------------------------------------------------
@@ -114,6 +115,7 @@ parser.add_argument('--config','-c',help='use an alternate configuration file',d
 
 parser.add_argument('--debug','-d',help='debug (to stderr)',action='store_true')
 parser.add_argument('--display',help='display plots',action='store_true')
+parser.add_argument('--email',help='email data',action='store_true')
 parser.add_argument('--version','-v',help='show version and exit',action='store_true')
 parser.add_argument('--month','-m',help='create a report for the given month 1..12 (current year assumed)')
 parser.add_argument('--year','-y',help='create a report for the given year (need to specify month too!)')
@@ -175,7 +177,8 @@ if args.month: # manually specified a single month
 	yyyyStart = yyyy
 	mmStop = mm
 	yyyyStop = yyyy
-
+	_,lastDayOfMonth = calendar.monthrange(yyyyStop,mmStop)
+	
 ottp.Debug(f'{mmStart} {yyyyStart},{mmStop} {yyyyStop}')
 
 startMJD = ottp.MJD(datetime(yyyyStart,mmStart,1,0,0,0,tzinfo=timezone.utc).timestamp())
@@ -187,15 +190,10 @@ if ('main:root certificate' in cfg):
 	rootCert= cfg['main:root certificate']
 
 
-ottp.Debug(f'Connecting to the database {db}')
-dbc = sqlite3.connect(db) # this opens a connection to the database
-curs = dbc.cursor()   
-
 # Make a plot for each GNSS
-
+# One page should be fine
 fig, axs = plt.subplots(len(gnss),1,figsize=[8,12],squeeze=False) #unsqueeze so we always get an array of axes
-dstr = f'{mmStop} {yyyyStop}'
-title = 'bUTC_GNSS check for ' + dstr + '\n'
+title = 'bUTC_GNSS check for ' + calendar.month_name[mmStop]+ f' {yyyyStop}\n'
 title += os.path.basename(sys.argv[0])+ ' v' + VERSION   + ' run ' + dt.strftime('%Y-%m-%d %H:%M:%S') + '\n'
 fig.suptitle(title,ha='left',x=0.1)
 
@@ -204,21 +202,30 @@ plotIndex = 0
 for g in gnss:
 	m,d,u = FetchBIPMBUTC(g,startMJD,stopMJD)  # nb u is string!
 	
+	axs[plotIndex,0].fill_between(m,d-u,d+u,color='palegreen')
 	axs[plotIndex,0].plot(m,d,color='g')
-	axs[plotIndex,0].scatter(m,d,s=9,marker='o',color='g')
-	axs[plotIndex,0].plot(m,d+u,linestyle='dashed',color='g') # uncertainty
-	axs[plotIndex,0].plot(m,d-u,linestyle='dashed',color='g') # uncertainty
+	axs[plotIndex,0].scatter(m,d,s=9,marker='o',color='g',label='Circular T')
+	
+	m,d,u = ReadLabBUTC(db,g,startMJD,stopMJD)
+	
+	axs[plotIndex,0].fill_between(m,d-u,d+u,color='lightskyblue',alpha=0.5)
+	axs[plotIndex,0].plot(m,d,color='b')
+	axs[plotIndex,0].scatter(m,d,s=9,marker='o',color='b',label = 'local')
+
 	axs[plotIndex,0].set_ylabel('ns')
 	axs[plotIndex,0].set_xlabel('MJD')
 	axs[plotIndex,0].set_title(f'UTC - bUTC_{g}')
 	axs[plotIndex,0].grid()
 	
-	m,d,u = ReadLabBUTC(db,g,startMJD,stopMJD)
+	axs[plotIndex,0].legend()
 	
 	plotIndex += 1
 
-
-
+if args.email:
+	pass
+	
 if args.display:
 	plt.show()
+	
+
 
