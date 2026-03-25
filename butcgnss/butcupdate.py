@@ -59,7 +59,7 @@ try:
 except ImportError:
 	sys.exit('ERROR: Must install rinexlib\n eg openttp/software/system/installsys.py -i rinexlib')
 	
-VERSION = '0.12.0'
+VERSION = '0.12.1'
 AUTHORS = 'Michael Wouters'
 
 SQRT2 = math.sqrt(2)
@@ -777,6 +777,9 @@ while mjd < stopMJD :
 #print(f"Python sqlite3 Module Version: {sqlite3.version}")
 
 # Finally, update the database
+
+# We need to remove the first data point since it was not processed completely
+newData.pop(startMJD - 1)
 
 updatedMJDs = [] # keep track of MJDs for which there is new UTC data
 

@@ -43,7 +43,7 @@ try:
 except ImportError:
 	sys.exit('ERROR: Must install ottplib\n eg openttp/software/system/installsys.py -i ottplib')
 
-VERSION = '0.1.0'
+VERSION = '0.1.1'
 AUTHORS = 'Michael Wouters'
 
 MIN_UTCK_U = 5
@@ -256,7 +256,7 @@ for m in range(startMJD,stopMJD+1):
 			
 			if x[0]==None: # no data
 				outputLine += f'{missingData:>9}{missingData:>5}{missingData:>9}{missingData:>5}'
-			elif x[4]==None or x[2] == 0: # no UTC data, or not cleared for release
+			elif x[2] == None or x[4] == None or x[4] == 0 : # no UTC data, or not cleared for release
 				reportedUTCkUncert = x[1]
 				if reportedUTCkUncert  < minUTCkUncertainty:
 					reportedUTCkUncert = minUTCkUncertainty
