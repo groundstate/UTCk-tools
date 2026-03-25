@@ -25,6 +25,9 @@
 #
 
 import argparse
+import calendar
+from datetime import datetime
+from datetime import timezone
 import os
 import sqlite3
 import sys
@@ -40,7 +43,7 @@ try:
 except ImportError:
 	sys.exit('ERROR: Must install ottplib\n eg openttp/software/system/installsys.py -i ottplib')
 
-VERSION = '0.1.0'
+VERSION = '0.2.0'
 AUTHORS = 'Michael Wouters'
 
 NPREVDAYS = 60
@@ -67,6 +70,8 @@ parser = argparse.ArgumentParser(description='Releases data newly updated from C
 parser.add_argument('--config','-c',help='use an alternate configuration file',default=configFile)
 parser.add_argument('--debug','-d',help='debug (to stderr)',action='store_true')
 parser.add_argument('--version','-v',help='show version and exit',action='store_true')
+parser.add_argument('--month','-m',help='release data for the given month 1..12 (current year assumed)')
+parser.add_argument('--year','-y',help='release data for the given year (need to specify month too!)')
 
 args = parser.parse_args()
 
@@ -95,6 +100,27 @@ if ('database:file' in cfg):
 mjdToday  = ottp.MJD(time.time())
 stopMJD   = mjdToday - 1 # previous day
 startMJD  = stopMJD - nPrevDays
+
+dt   = datetime.now(tz=timezone.utc) # get date in UTC
+yyyy = dt.year
+
+if args.year:
+	if not args.month:
+		ottp.ErrorExit('You need to specify the month as well (--month 1..12)')
+
+if args.month: # manually specified a single month 
+	if args.year:
+		yyyy = int(args.year)
+	mm = int(args.month)
+	mmStart = mm
+	yyyyStart = yyyy
+	mmStop = mm
+	yyyyStop = yyyy
+	_,lastDayOfMonth = calendar.monthrange(yyyyStop,mmStop)
+	startMJD = ottp.MJD(datetime(yyyyStart,mmStart,1,0,0,0,tzinfo=timezone.utc).timestamp())
+	stopMJD =  ottp.MJD(datetime(yyyyStop,mmStop,lastDayOfMonth,0,0,0,tzinfo=timezone.utc).timestamp())
+
+ottp.Debug(f'Processing for {startMJD} to {stopMJD}')
 
 ottp.Debug(f'Connecting to the database {db}')
 dbc = sqlite3.connect(db) # this opens a connection to the database
