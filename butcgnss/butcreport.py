@@ -126,7 +126,7 @@ parser = argparse.ArgumentParser(description='Updates the monthly report',
 parser.add_argument('--config','-c',help='use an alternate configuration file',default=configFile)
 parser.add_argument('--debug','-d',help='debug (to stderr)',action='store_true')
 parser.add_argument('--version','-v',help='show version and exit',action='store_true')
-parser.add_argument('--month','-m',help='create a report for the givem month 1..12 (current year assumed)')
+parser.add_argument('--month','-m',help='create a report for the given month 1..12 (current year assumed)')
 parser.add_argument('--year','-y',help='create a report for the given year (need to specify month too!)')
 
 args = parser.parse_args()
