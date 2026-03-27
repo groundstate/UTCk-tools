@@ -59,7 +59,7 @@ try:
 except ImportError:
 	sys.exit('ERROR: Must install rinexlib\n eg openttp/software/system/installsys.py -i rinexlib')
 	
-VERSION = '0.12.1'
+VERSION = '0.12.2'
 AUTHORS = 'Michael Wouters'
 
 SQRT2 = math.sqrt(2)
@@ -787,7 +787,7 @@ for m in newData:
 	# Build an 'upsert' command
 	inscmd = 'INSERT INTO butcgnss (mjd'
 	valscmd = f'VALUES ({m}'
-	updatedcols = ''
+	updateSet = ''
 	cnt = 0
 
 		
@@ -795,12 +795,16 @@ for m in newData:
 		# Query the database for a new value of UTC - UTC(k)
 		# We need to do this for each GNSS since there may not have been NAV data for a particular GNSS
 		
-		r = curs.execute(f'SELECT UTC_{g} from butcgnss where MJD={m};')
+		r = curs.execute(f'SELECT UTC_{g},UTC_{g}_u,release_utc from butcgnss where MJD={m};')
 		x = r.fetchone()
 		if x:
 			if (x[0] == None) and not(newData[m][g][2] == None): # not updated yet
 				if not m in updatedMJDs:
 					updatedMJDs.append(m)
+			if not(x[0] == None) and x[2] == None: # manual fiddling with DB can leave things inconsistent so clean up
+				if not m in updatedMJDs:
+					updatedMJDs.append(m)
+					
 		else: # no entry in database yet
 			if not(newData[m][g][2] == None):
 				if not m in updatedMJDs:
@@ -812,23 +816,24 @@ for m in newData:
 				valscmd += ',NULL'
 			else:
 				valscmd += f',{newData[m][g][i]}'
-		if cnt>0:
-			updatedcols += f',\nUTCk_{g}=EXCLUDED.UTCk_{g},'
+		if cnt==0:
+			updateSet += f'\nUTCk_{g}=EXCLUDED.UTCk_{g},' # starting the set
 		else:
-			updatedcols += f'\nUTCk_{g}=EXCLUDED.UTCk_{g},'
-		updatedcols += f'\nUTCk_{g}_u=EXCLUDED.UTCk_{g}_u,'
-		updatedcols += f'\nUTC_{g}=EXCLUDED.UTC_{g},'
-		updatedcols += f'\nUTC_{g}_u=EXCLUDED.UTC_{g}_u'
+			updateSet += f',\nUTCk_{g}=EXCLUDED.UTCk_{g},' # continuing the set
+		updateSet += f'\nUTCk_{g}_u=EXCLUDED.UTCk_{g}_u,'
+		updateSet += f'\nUTC_{g}=EXCLUDED.UTC_{g},'
+		updateSet += f'\nUTC_{g}_u=EXCLUDED.UTC_{g}_u'
 		cnt += 1
 	
 	if m in updatedMJDs:
 		valscmd += ',0'
 		inscmd  += ',RELEASE_UTC' 
-	
+		updateSet += f',\nrelease_utc=EXCLUDED.release_utc'
+		
 	inscmd += ')\n'
 	valscmd += ')\n'
 
-	cmd = inscmd + valscmd + 'ON CONFLICT(mjd)\n' + 'DO UPDATE SET' + updatedcols + ';\n' 
+	cmd = inscmd + valscmd + 'ON CONFLICT(mjd)\n' + 'DO UPDATE SET' + updateSet+ ';\n' # this allows insert of new row/update of existing row
 	curs.execute(cmd)
 	
 dbc.commit()
