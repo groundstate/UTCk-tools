@@ -44,7 +44,7 @@ try:
 except ImportError:
 	sys.exit('ERROR: Must install ottplib\n eg openttp/software/system/installsys.py -i ottplib')
 
-VERSION = '0.1.0'
+VERSION = '0.2.0'
 AUTHORS = 'Michael Wouters'
 
 # ------------------------------------------
@@ -190,6 +190,41 @@ if mmStop <= 0:
 	
 _,lastDayOfMonth = calendar.monthrange(yyyyStop,mmStop)
 
+# If this has not been run manually then we do checks
+if not(args.month):
+	
+	# Do we need to do this ?
+	# Is last month's PDF plot already there?
+	fPath  = Path(os.path.join(checkingPath,f'butcplot_{yyyyStop}{mmStop:02d}.pdf'))
+	if fPath.is_file():
+		ottp.Debug(f'butcplot_{yyyyStop}{mmStop:02d}.pdf already created - nothing to do')
+		sys.exit(0)
+		
+	# Are new UTC data available for release?
+	startMJD = ottp.MJD(datetime(yyyyStop,mmStop,1,0,0,0,tzinfo=timezone.utc).timestamp())
+	stopMJD =  ottp.MJD(datetime(yyyyStop,mmStop,lastDayOfMonth,0,0,0,tzinfo=timezone.utc).timestamp())
+
+	# Search backwards through the past month for unreleased data
+	ottp.Debug(f'Connecting to the database {db}')
+	dbc = sqlite3.connect(db) # this opens a connection to the database
+	curs = dbc.cursor()  
+
+	latestNewData = -1
+	for m in range(stopMJD,startMJD-1,-1):
+		r = curs.execute(f'SELECT release_utc FROM butcgnss WHERE mjd={m};')
+		x = r.fetchone()
+		if x:
+			if x[0] == 0:
+				ottp.Debug(f'Most recent unreleased data is for {m}')
+				latestNewData = m
+				break
+	curs.close()
+	dbc.close()
+	
+	if latestNewData == -1:
+		ottp.Debug('No unreleased data')
+		sys.exit(0)
+	
 if args.year:
 	if not args.month:
 		ottp.ErrorExit('You need to specify the month as well (--month 1..12)')
@@ -242,7 +277,7 @@ for g in gnss:
 	
 	plotIndex += 1
 
-plotFile = os.path.join(checkingPath,f'checkplots_{yyyyStop}{mmStop:02d}.pdf')
+plotFile = os.path.join(checkingPath,f'butcplot_{yyyyStop}{mmStop:02d}.pdf')
 plt.savefig(plotFile,format='pdf',) # do this before show()
 
 if args.email:
@@ -259,7 +294,10 @@ if args.email:
 	with open(plotFile,'rb') as fin:
 		fData = fin.read()
 		msg.add_attachment(fData,maintype='application',subtype='pdf',filename=Path(plotFile).name)
-		
+	
+	# Pick up the monthly reports
+	# TODO
+	
 	# Send the message via local SMTP server.
 	s = smtplib.SMTP(SMTPserver)
 	s.sendmail(emailSender,emailRecipients.split(','), msg.as_string())
