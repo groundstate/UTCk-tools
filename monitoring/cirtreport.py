@@ -54,7 +54,7 @@ sys.path.append("/usr/local/lib/python3.12/site-packages") # Ubuntu 24.04
 
 import ottplib as ottp
 
-VERSION = "1.1.0"
+VERSION = "1.2.0"
 AUTHORS = "Michael Wouters"
 
 # ------------------------------------------
@@ -94,8 +94,12 @@ configFile = os.path.join(home,'etc/cirtreport.conf')
 repDir  = os.path.join(home,'cirt/reports') 
 historyLength = 12 # in months
 tmpDir = os.path.join(home,'tmp')
-recipients = 'time@measurement.gov.au'
+
+recipients = 'time@nmi.gov'
+SMTPserver = 'localhost'
+sender = 'time@nmi.gov'
 email = False
+
 lab = 'AUS'
 httpRequest ='https://webtai.bipm.org/api/v1.0/get-data.html?'
 rootCert = None # if you use an empty string, this will skip SSL verification which is a bad thing
@@ -141,6 +145,12 @@ if ('main:email' in cfg):
 	
 if ('main:email recipients' in cfg):
 	recipients = cfg['main:email recipients']
+
+if 'main:email sender' in cfg:
+	sender = cfg['main:email sender']
+	
+if 'main:smtp server' in cfg:
+	SMTPserver = cfg['main:smtp server']
 	
 if ('main:report path' in cfg):
 	repDir = ottp.MakeAbsolutePath(cfg['main:report path'],home)
@@ -336,14 +346,12 @@ except:
 
 if email:
 	ottp.Debug('Sending email')
-	sender = 'time@measurement.gov.au'
 
 	msg = MIMEMultipart('related')
 	msg['Subject'] = f'Monthly UTC({lab}) report for ' + dt.strftime('%b %Y')
 	msg['From'] = sender
 	msg['To'] = recipients
 	msg['Reply-To'] = sender
-
 	body = MIMEText(html,'html')
 	msg.attach(body)
 
@@ -372,8 +380,8 @@ if email:
 	msg.attach(msgImage)
 
 	# Send the message via local SMTP server.
-	s = smtplib.SMTP('copperhead.in.measurement.gov.au')
-	s.sendmail([recipients],['time@measurement.gov.au'], msg.as_string())
+	s = smtplib.SMTP(SMTPserver)
+	s.sendmail([recipients],[sender], msg.as_string())
 	s.quit()
 
 # Remove temporary files
