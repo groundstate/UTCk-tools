@@ -28,6 +28,15 @@ Check out 'develop', cd to software/system/ and then, with superuser privileges,
 A single configuration file controls the operation of all four scripts.
 The sample configuration file documents the available configuration options.
 
+One important option is the choice between using Circular T reports or the BIPM Web API 
+to get UTC - UTC(k) differences and their uncertainty.
+The Web API currently reports the total uncertainty rather than the components uA and uB.
+Usually, uA << uB so the total uncertainty is just uB but this is not always true.
+
+For this reason, the option to use the published Circular T is available.
+butcupdate.py does not attempt to download Circular T though.
+It is assumed that Circlar T is available as a local file.
+
 
 # Setting up cron
 
@@ -44,7 +53,7 @@ most affect the published uncertainty by +/- 1 ns.
 butcreport.py can be run each day. It recalculates all values in the database within a window of XX days, 
 from the current day.
 
-butcrcheck.py is run after Circular T is published.
+butcrcheck.py should run after Circular T is published.
 
 butcrelease.py is run manually.
 It indicates the MJDs for which data updated from Circular T is now available.
@@ -54,6 +63,9 @@ Values of UTC-bUTC_GNSS are not reported in he published report until they are r
 You may need to define USER in your crontab
 eg in the crontab
 USER=butcgnss
+
+
+
 
 
 
