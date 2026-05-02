@@ -30,6 +30,7 @@ from datetime import datetime
 from datetime import timezone
 import math 
 import os
+from pathlib import Path
 import re
 import requests
 import shutil
@@ -59,7 +60,7 @@ try:
 except ImportError:
 	sys.exit('ERROR: Must install rinexlib\n eg openttp/software/system/installsys.py -i rinexlib')
 	
-VERSION = '0.12.2'
+VERSION = '0.13.0'
 AUTHORS = 'Michael Wouters'
 
 SQRT2 = math.sqrt(2)
@@ -443,7 +444,7 @@ configFile = os.path.join(root,'etc/butc.conf')
 rnxDir = os.path.join(root,'rinex')
 tmpDir  = os.path.join(root,'tmp')
 cggttsDir = os.path.join(root,'cggtts')
-cirtDir = os.path.join(root,'cirt')
+cirtDir = os.path.join(root,'cirt') # mainly used 
 db = os.path.join(root,'butcgnss.db')
 cirtSource = CIRT_REPORT 
 nPrevDays = NPREVDAYS
@@ -466,6 +467,7 @@ parser.add_argument('mjd',nargs = '*',help='first MJD [last MJD] (if not given, 
 parser.add_argument('--config','-c',help='use an alternate configuration file',default=configFile)
 parser.add_argument('--debug','-d',help='debug (to stderr)',action='store_true')
 parser.add_argument('--cirt',help='source of data for Circular T (webapi,report,download)')
+parser.add_argument('--cirt-dir',help='local directory containing  Circular T data (report,download)')
 parser.add_argument('--nprev',help='number of previous days to process',default=nPrevDays)
 parser.add_argument('--version','-v',help='show version and exit',action='store_true')
 
@@ -526,7 +528,11 @@ gnss = [g.strip() for g in gnss]
 
 if 'main:root' in cfg:
 	root = cfg['main:root']
-
+	# If the root is not absolute, prepend the user's home directory
+	tmpPath = Path(root)
+	if not tmpPath.is_absolute():
+		root = os.path.join(home,root)
+	
 if 'main:lab' in cfg:
 	lab = cfg['main:lab']
 	
@@ -554,6 +560,9 @@ if 'rinex:path' in cfg:
 		ottp.ErrorExit('Missing entries in configuration file')
 	staName = cfg['rinex:station name']
 	rnxVersion = int(cfg['rinex:version'])
+
+if args.cirt_dir: # root path defined now
+	cirtDir = ottp.MakeAbsolutePath(args.cirt_dir,root)
 
 # Connect to the database
 # Do this before we download CircularT because we need uA from the database
@@ -613,8 +622,8 @@ elif cirtSource == CIRT_DOWNLOAD:
 	cirt,firstMJD,lastMJD = FetchUTCkLocal(lab,cirtStartMJD,cirtStopMJD)
 
 if not cirt:
-	sys.exit("Couldn't get Circular T data")
-
+	sys.exit('No Circular T data available')
+	
 cirtAsList = list(cirt.values())
 
 prevCGGTTSFile = {}
@@ -790,7 +799,6 @@ for m in newData:
 	updateSet = ''
 	cnt = 0
 
-		
 	for g in gnss:
 		# Query the database for a new value of UTC - UTC(k)
 		# We need to do this for each GNSS since there may not have been NAV data for a particular GNSS
