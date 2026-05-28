@@ -1,5 +1,5 @@
 #!/bin/bash
-for file in original/*; do
+for file in nav/*; do
 	if [ -f "$file" ]; then
 		echo "Processing $file"
 		fbase=$(basename $file)
