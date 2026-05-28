@@ -1,18 +1,19 @@
-%%
+%
 % Note that the MATLAB library CGGTTS is available from
 % 
 
 %% Setup
-startMJD = 61040;
-stopMJD  = 61072;
+startMJD = 61041;
+stopMJD  = 61071; 
 GNSS = 'G';
 GNSSName = 'GPS';
 rootDir = '~/src/UTCk-tools/butcgnss/verification/data';
 leapSecs = 18;
 GPSEpoch = 44244;
+halfWin = 12.0;
 
 %% Read CGGTTS data, filter and eyeball it
-cg = CGGTTS(startMJD,stopMJD,[rootDir '/cggtts/'],[GNSS 'ZPT13'],'NamingConvention','BIPM','RemoveBadTracks','yes');
+cg = CGGTTS(startMJD-1,stopMJD+1,[rootDir '/cggtts/'],[GNSS 'ZPT13'],'NamingConvention','BIPM','RemoveBadTracks','yes');
 totalTracks = length(cg.Tracks);
 fprintf('Total tracks = %d\n',totalTracks);
 
@@ -45,9 +46,9 @@ title('Filtered REFSYS');
 refsys = [cg.Tracks(:,cg.MJD)+cg.Tracks(:,cg.STTIME)/86400,cg.Tracks(:,cg.REFSYS)*0.1];
 % Not very efficient ...
 i = 1;
-avrefsys=zeros((stopMJD-1) - (startMJD +1)+1,2);
-for mjd=startMJD+1:stopMJD-1
-    win = (refsys(:,1) >= mjd - 1.0/24.0) & (refsys(:,1) <= mjd + 1.0/24.0);
+avrefsys=zeros(stopMJD - startMJD + 1,2);
+for mjd=startMJD:stopMJD  
+    win = (refsys(:,1) >= mjd - halfWin/24.0) & (refsys(:,1) <= mjd + halfWin/24.0);
     xrefsys = refsys(win,:,:);
     avrefsys(i,:) = [mjd,mean(xrefsys(:,2))];
     i = i + 1;
@@ -88,17 +89,51 @@ legend('raw REFSYS','averaged REFSYS','UTC-UTC(PTB)');
 %% Load Time System Corrections
 tsc = load([ GNSSName '.TimeSysCorr.txt']);
 % Compute 
-for mjd=startMJD+1:stopMJD-1
+i=1; % won't be too fancy - we know how to index into tsc to get data for a given MJD
+dUTCGPS=zeros(stopMJD - startMJD + 1,2);
+for mjd=startMJD:stopMJD
     % BDS
     % GAL
     % GPS
-    % Don't have to worry about leap seconds any more ...
+    % Don't have to worry about leap second logic any more ...
     N = mjd - GPSEpoch;
     Wn = floor(N/7);
     Dn = mod(N,7);
-    fprintf('%g %g %g\n',mjd,Wn,Dn);
+    %fprintf('%g %g %g\n',mjd,Wn,Dn);
+    iTSC = i+1;
+    iTSC = i;
+    deltaUTC1 = tsc(iTSC,2) + tsc(iTSC,3)*(Dn*86400 + leapSecs - tsc(iTSC,4) + 604800*(Wn - tsc(iTSC,5))); % per the ICD
+    iTSC = i+1;
+    deltaUTC2 = tsc(iTSC,2) + tsc(iTSC,3)*(Dn*86400 + leapSecs - tsc(iTSC,4) + 604800*(Wn - tsc(iTSC,5)));
+    deltaUTC = (deltaUTC1+deltaUTC2)/2.0;
+    dUTCGPS(i,:) = [mjd,-deltaUTC/1.0E-9]; % since tUTC = tGPS - dUTC
+    i=i+1;
 end
 
+figure(4);
+plot(cg.Tracks(:,cg.MJD)+cg.Tracks(:,cg.STTIME)/86400 -startMJD,cg.Tracks(:,cg.REFSYS)*0.1,'.');
+hold on;
+plot(avrefsys(:,1)-startMJD,avrefsys(:,2),'yo-');
+plot(utcptb(:,1)-startMJD,utcptb(:,2),'+-','LineWidth',2);
+plot(dUTCGPS(:,1)-startMJD,dUTCGPS(:,2),'*-','LineWidth',2);
+hold off;
+xlabel(['MJD - ',num2str(startMJD)]);
+ylabel('ns');
+xlim([0 35]);
+title('Check on bUTC');
+legend('raw REFSYS','averaged REFSYS','UTC-UTC(PTB)','bUTC\_GNSS');
+
 %% Compute UTC - bUTC_GNSS and UTC(PTB) - bUTC_GNSS
+% UTCk - bUTC = (UTCk - GNSS) - (UTC - GNSS);
+UTCk_bUTC = avrefsys(:,2) - dUTCGPS(:,2);
 
 
+% Load Circular T estimates
+UTCbUTCCirT = load('UTC_bUTC_GPS_cirt.txt');
+
+figure(5);
+plot(UTCk_bUTC);
+hold on;
+plot(UTCbUTCCirT(:,2));
+hold off;
+legend('UTCk\_bUTC','UTC-bUTC (CircularT');
