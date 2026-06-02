@@ -60,7 +60,7 @@ try:
 except ImportError:
 	sys.exit('ERROR: Must install rinexlib\n eg openttp/software/system/installsys.py -i rinexlib')
 	
-VERSION = '0.13.0'
+VERSION = '0.14.0'
 AUTHORS = 'Michael Wouters'
 
 SQRT2 = math.sqrt(2)
@@ -532,6 +532,10 @@ if 'main:root' in cfg:
 	tmpPath = Path(root)
 	if not tmpPath.is_absolute():
 		root = os.path.join(home,root)
+
+if 'main:window size' in cfg:
+	winSize = int(cfg['main:window size'])
+	ottp.Debug(f'REFSYS averaging window = {winSize} hours')
 	
 if 'main:lab' in cfg:
 	lab = cfg['main:lab']
