@@ -74,17 +74,24 @@ legend('raw REFSYS','averaged REFSYS');
 
 utcptb = load('utc_ptb.txt');
 
+% Resample this, linearly interpolating between Circular T reporting days
+mjd = startMJD:stopMJD;
+mjd = mjd';
+interp_utck = interp1(utcptb(:,1),utcptb(:,2),mjd,'linear');
+interp_utck = interp_utck';
+
 figure(3);
 plot(cg.Tracks(:,cg.MJD)+cg.Tracks(:,cg.STTIME)/86400 -startMJD,cg.Tracks(:,cg.REFSYS)*0.1,'.');
 hold on;
 plot(avrefsys(:,1)-startMJD,avrefsys(:,2),'yo-');
 plot(utcptb(:,1)-startMJD,utcptb(:,2),'+-','LineWidth',2);
+plot(mjd-startMJD,interp_utck,'o');
 hold off;
 xlabel(['MJD - ',num2str(startMJD)]);
 ylabel('ns');
 xlim([0 35]);
 title('Check on UTC-UTC(PTB)');
-legend('raw REFSYS','averaged REFSYS','UTC-UTC(PTB)');
+legend('raw REFSYS','averaged REFSYS','UTC-UTC(PTB)','Interpolated UTC-UTC(PTB)');
 
 %% Load Time System Corrections
 tsc = load([ GNSSName '.TimeSysCorr.txt']);
@@ -129,11 +136,13 @@ UTCk_bUTC = avrefsys(:,2) - dUTCGPS(:,2);
 
 
 % Load Circular T estimates
-UTCbUTCCirT = load('UTC_bUTC_GPS_cirt.txt');
+UTC_bUTC_CirT = load('UTC_bUTC_GPS_cirt.txt');
 
 figure(5);
-plot(UTCk_bUTC);
+plot(UTCk_bUTC,'.-');
 hold on;
-plot(UTCbUTCCirT(:,2));
+plot(UTC_bUTC_CirT(:,2),'.-');
+plot(interp_utck + UTCk_bUTC','.-'); % (UTC - bUTC) = UTC- UTCk + (UTCk - bUTC)
+plot(interp_utck);
 hold off;
-legend('UTCk\_bUTC','UTC-bUTC (CircularT');
+legend('UTCk\_bUTC','UTC-bUTC (UTCk)','UTC-bUTC (CircularT)','UTC-UTCk (interpolated)');
