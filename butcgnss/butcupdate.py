@@ -60,7 +60,7 @@ try:
 except ImportError:
 	sys.exit('ERROR: Must install rinexlib\n eg openttp/software/system/installsys.py -i rinexlib')
 	
-VERSION = '0.14.0'
+VERSION = '0.15.0'
 AUTHORS = 'Michael Wouters'
 
 SQRT2 = math.sqrt(2)
@@ -93,6 +93,8 @@ CIRT_REF_MJD   = 59944
 CIRT_WEB_API  = 0
 CIRT_REPORT   = 1
 CIRT_DOWNLOAD = 2
+
+LEAPSECS = 18 # sometimes the number of leap seconds is not present in the navigation file
 
 # ------------------------------------------
 def ShowVersion():
@@ -325,7 +327,7 @@ def ReadCircularT(lab,startMJD,stopMJD):
 	# Estimate the range of issues to load
 	startIssue = CIRT_REF_ISSUE + int(math.floor((startMJD - CIRT_REF_MJD)/(365.25/12.0)))
 	stopIssue  = CIRT_REF_ISSUE + int(math.ceil((stopMJD - CIRT_REF_MJD)/(365.25/12.0))) # may go one too far but that's OK
-	ottp.Debug(f'{startMJD},{stopMJD}->issues {startIssue},{stopIssue}')
+	ottp.Debug(f'[{startMJD},{stopMJD}]->issues {startIssue},{stopIssue}')
 	utck = {} # using a dictionary gets rid of the duplicates automatically
 	labregex = r'^' + lab
 	firstMJD = lastMJD = None
@@ -569,11 +571,9 @@ if args.cirt_dir: # root path defined now
 	cirtDir = ottp.MakeAbsolutePath(args.cirt_dir,root)
 
 # Connect to the database
-# Do this before we download CircularT because we need uA from the database
-
 ottp.Debug(f'Connecting to the database {db}')
-dbc = sqlite3.connect(db) # this opens a connection to the database, creating the db if it doesn't exist
-curs = dbc.cursor()       #
+dbc = sqlite3.connect(db) # this creates the db if it doesn't exist
+curs = dbc.cursor()       
 
 # Create the table, if it doesn't exist
 # The primary key for the table is the MJD
@@ -597,16 +597,6 @@ curs.execute(
 
 ottp.Debug(f'Processing range is {startMJD} - {stopMJD}')
 
-# CircularT data is downloaded each run
-# One year of data is a 2K file so we shouldn't worry too much about 
-# about the load on the web server
-# Need to get Circular T so that we know the current uncertainty uB
-# Unfortunately the Web API returns the total uncertainty.
-# In most cases, and for us, uB dominates so for the moment
-# we'll use the total uncertainty for uB. Typically, we won't have a matching uB
-# for an MJD, so we'll just be using the most recent anyway (noting that this will be fixed
-# later when the UTC update is done)
-
 # Initial guess on the range of Circular T to ask for is
 # [startMJD -7, stopMJD + 7] say
 
@@ -614,15 +604,26 @@ cirtStartMJD = startMJD - 7
 cirtStopMJD  = stopMJD  + 7
 
 # FIXME when an MJD range is specified, this may need to be extended backwards 
-# to get a reported day
+# to get a reported day ?
 
 ottp.Debug(f'Getting Circular T data for {cirtStartMJD} - {cirtStopMJD}')
 
 if cirtSource == CIRT_WEB_API:
+	# We need the uncertainties uA and uB, which are not fixed.
+	# Unfortunately the Web API returns the total uncertainty .
+	# In most cases uB dominates so for the moment
+	# we'll use the total uncertainty for uB. Typically, we won't have a matching uB
+	# for an MJD when computing UTCk-bUTC_GNSS, so we'll just be using the most recent anyway 
+	# (noting that this will be corrected later when the UTC update is done)
+	# Circular T data are downloaded each run. 
+	# One year of data is a 2K file so we shouldn't worry too much about 
+	# about the load on the web server
 	cirt, firstMJD,lastMJD = FetchUTCkRemote(lab,cirtStartMJD,cirtStopMJD)	
 elif cirtSource == CIRT_REPORT:
 	cirt, firstMJD,lastMJD = ReadCircularT(lab,cirtStartMJD,cirtStopMJD)	
 elif cirtSource == CIRT_DOWNLOAD:
+	# Same problem with uA and uB as with download via Web API
+	# This option is mainly here for debugging without constant querying of the BIPM Web API
 	cirt,firstMJD,lastMJD = FetchUTCkLocal(lab,cirtStartMJD,cirtStopMJD)
 
 if not cirt:
@@ -635,10 +636,49 @@ prevCGGTTSFile['BDS'] = CGGTTS(None,None)
 prevCGGTTSFile['GAL'] = CGGTTS(None,None)
 prevCGGTTSFile['GLO'] = CGGTTS(None,None)
 prevCGGTTSFile['GPS'] = CGGTTS(None,None)
+
 newData = {}
 
-mjd = startMJD - 2  # start two days earlier because of 1. immediate increment and 2. need the previous day's data
+# Get UTC predictions for each MJD from the navigation files
 
+timeSysCorr={}      # holds TIMESYS CORR for each MJD
+mjd = startMJD - 2  # start two days earlier because of 1. immediate increment and 2. need the previous day's data
+while mjd < stopMJD :
+	mjd += 1 # doing this here means not having to increment multiple times
+	
+	ts = (mjd - 40587)*86400 # convert MJD to UNIX time
+	dt = datetime.fromtimestamp(ts, tz=timezone.utc) # get date in UTC
+	yyyy = dt.year
+	mm   = dt.month
+	dd   = dt.day
+	doy = int(dt.strftime('%j'))
+	
+	ottp.Debug(f'Locating navigation file for {mjd}: {yyyy}-{mm}-{dd}: DOY = {doy}')
+	
+	# Find the navigation file
+	navFile,zExt = rinex.FindNavigationFile(rnxDir,staName,yyyy,doy,rnxVersion,False) # don't exit if not found
+	if navFile:
+		ottp.Debug(f'Found {navFile}, compression = {zExt}')
+		src = navFile + zExt
+		srcBase = os.path.basename(src)
+		dst = os.path.join(tmpDir,srcBase)
+		# We may not own the file so we need to make a local copy
+		shutil.copy(src,dst)
+		navFile,zAlgorithm = rinex.Decompress(dst)
+		tsc = GetTimeSysCorr(navFile) # This is for all GNSS
+		ls = rinex.GetLeapSeconds(navFile,rnxVersion) # opened twice so a bit inefficient but anyway
+		if ls == 0:
+			ls = LEAPSECS # FIXME could check MJD against MJD of last leap second
+			ottp.Debug(f'LEAP SECONDS not found - set to {ls}')
+		os.unlink(navFile)
+		if debug:
+			print(timeSysCorr)
+		timeSysCorr[mjd] = [tsc,ls]
+	else:
+		timeSysCorr[mjd] = None # flag as not found
+		ottp.Debug("Couldn't find the navigation file")
+	
+mjd = startMJD - 2 # reset the MJD
 while mjd < stopMJD :
 	mjd += 1 # doing this here means not having to increment multiple times
 	
@@ -651,29 +691,8 @@ while mjd < stopMJD :
 	
 	ottp.Debug(f'\nProcessing {mjd}: {yyyy}-{mm}-{dd}')
 	
-	# Find the navigation file
-	navFile,zExt = rinex.FindNavigationFile(rnxDir,staName,yyyy,doy,rnxVersion,False) # don't exit if not found
-
-	timeSysCorr = {}
-	if navFile:
-		ottp.Debug(f'Found {navFile}, compression = {zExt}')
-		src = navFile + zExt
-		srcBase = os.path.basename(src)
-		dst = os.path.join(tmpDir,srcBase)
-		# We may not own the file so we need to make a local copy
-		shutil.copy(src,dst)
-		navFile,zAlgorithm = rinex.Decompress(dst)
-		timeSysCorr = GetTimeSysCorr(navFile)
-		leapSecs = rinex.GetLeapSeconds(navFile,rnxVersion) # read twice so a bit inefficient but anyway
-		os.unlink(navFile)
-		if debug:
-			print(timeSysCorr)
-	else:
-		ottp.Debug("Couldn't find a navigation file for {yyyy} {doy}")
-	
 	newData[mjd] = {} # we get an empty entry first time through but that's OK
 	
-	# 
 	uAcirt,uBcirt = GetNearestCirtU(cirtAsList,mjd) # could be None
 	
 	for g in gnss:
@@ -714,18 +733,24 @@ while mjd < stopMJD :
 			prevCGGTTSFile[g] = cgf
 			continue
 	
-		if not navFile: # check this before we move on
+		if not(timeSysCorr[mjd]) or not(timeSysCorr[mjd-1]): # check this before we move on
+			ottp.Debug('TIMESYS CORR unavailable')
 			prevCGGTTSFile[g] = cgf
 			continue
 			
-		tsCorr = timeSysCorr[g]
-		if not tsCorr:
-			ottp.Debug(f'time sys corrections unavailable for {g}')
+		tsCorr = timeSysCorr[mjd][0][g]
+		if not(tsCorr) or not(timeSysCorr[mjd-1][0][g]):
+			ottp.Debug(f'TIMESYS CORR unavailable for {g}')
 			prevCGGTTSFile[g] = cgf
 			continue
-			
-		deltaUTC = DeltaGNSSUTC(g,Wn,Dn,leapSecs,tsCorr)
-			
+		leapSecs = timeSysCorr[mjd][1]
+		
+		# Calculate TIMESYS CORR as average of predictions for today and previous day
+		# evaluated at the beginning of today
+		deltaUTCprev = DeltaGNSSUTC(g,Wn,Dn,timeSysCorr[mjd-1][1],timeSysCorr[mjd-1][0][g]) # previous day
+		deltaUTCToday = DeltaGNSSUTC(g,Wn,Dn,leapSecs,tsCorr) # today
+		deltaUTC = (deltaUTCprev + deltaUTCToday)/2.0
+
 		newData[mjd][g][D_UTCK_BUTC] = refsys0 + deltaUTC
 		if uBcirt == None:
 			newData[mjd][g][U_UTCK_BUTC] = None # UNTESTED
@@ -756,7 +781,7 @@ while mjd < stopMJD :
 				else:
 					newData[mjd][g][U_UTC_BUTC] = math.sqrt(uRefsys0**2 +  uAcirt**2 + uBcirt**2 + U_CAL_GNSS[g]**2 +  U_NAVMSG_GNSS[g]**2) # no contribution from instability
 				mjdLastupdateUTC = mjd
-			prevCGGTTSFile[g] = cgf # this is correct - we only have mjd0, so we're done after tewsing for mjd==mjd0 
+			prevCGGTTSFile[g] = cgf # this is correct - we only have mjd0, so we're done after testing for mjd==mjd0 
 			continue
 		
 		utc0 = cirt[mjd0][1]
@@ -780,7 +805,7 @@ while mjd < stopMJD :
 			
 			newData[mjd][g][U_UTC_BUTC] = math.sqrt(uRefsys0**2 + cirt[mjd0][3]**2 + cirt[mjd0][4]**2 + utcInterpUncert**2 +
 					UTCkInstability**2+ U_CAL_GNSS[g]**2 +  U_NAVMSG_GNSS[g]**2) 
-			
+			ottp.Debug(f'UTC_bUTC GPS {mjd} {newData[mjd][g][D_UTC_BUTC] } +/- {newData[mjd][g][U_UTC_BUTC]}')
 		prevCGGTTSFile[g] = cgf # save it for the next iteration
 	
 	if (mjd == startMJD):
