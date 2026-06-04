@@ -60,7 +60,7 @@ try:
 except ImportError:
 	sys.exit('ERROR: Must install rinexlib\n eg openttp/software/system/installsys.py -i rinexlib')
 	
-VERSION = '0.15.0'
+VERSION = '0.15.1'
 AUTHORS = 'Michael Wouters'
 
 SQRT2 = math.sqrt(2)
@@ -427,7 +427,7 @@ def InterpolateUTC(mjd,mjd0,mjd1,cirt):
 	return utcm,uc
 
 # -------------------------------------------
-def ClockStability(clockModel,tauDays):
+def ClockInstability(clockModel,tauDays):
 	if clockModel == CLOCK_5071_STD:
 		return 2.0*math.sqrt(tauDays) # in ns 
 	elif clockModel == CLOCK_MASER:
@@ -798,14 +798,15 @@ while mjd < stopMJD :
 			# UTC interpolation uncertainty == utcUncert (which includes the link calibration uncertainty)
 			# UTC(k) instability 
 			# GNSS provider link's calibration uncertainty
-			# UTC prediction 
-			UTCkInstability = ClockStability(clockModel,mjd - mjd0)
-			if  ClockStability(clockModel,mjd - mjd0) <  UTCkInstability:
-				UTCkInstability = ClockStability(clockModel,mjd1- mjd)
+			# UTC prediction (by GNSS)
+			minTau = mjd - mjd0
+			if mjd1 - mjd < minTau:
+				minTau = mjd1 - mjd
+			clkInstability = ClockInstability(clockModel,minTau)
 			
 			newData[mjd][g][U_UTC_BUTC] = math.sqrt(uRefsys0**2 + cirt[mjd0][3]**2 + cirt[mjd0][4]**2 + utcInterpUncert**2 +
-					UTCkInstability**2+ U_CAL_GNSS[g]**2 +  U_NAVMSG_GNSS[g]**2) 
-			ottp.Debug(f'UTC_bUTC GPS {mjd} {newData[mjd][g][D_UTC_BUTC] } +/- {newData[mjd][g][U_UTC_BUTC]}')
+					clkInstability**2+ U_CAL_GNSS[g]**2 +  U_NAVMSG_GNSS[g]**2) 
+			ottp.Debug(f'UTC_bUTC GPS {mjd} {newData[mjd][g][D_UTC_BUTC] } +/- {newData[mjd][g][U_UTC_BUTC]} uInterp = {utcInterpUncert} uInstability = {clkInstability}')
 		prevCGGTTSFile[g] = cgf # save it for the next iteration
 	
 	if (mjd == startMJD):
