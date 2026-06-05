@@ -60,7 +60,7 @@ try:
 except ImportError:
 	sys.exit('ERROR: Must install rinexlib\n eg openttp/software/system/installsys.py -i rinexlib')
 	
-VERSION = '0.16.0'
+VERSION = '0.16.1'
 AUTHORS = 'Michael Wouters'
 
 SQRT2 = math.sqrt(2)
@@ -443,11 +443,8 @@ home =os.environ['HOME']
 root = home
 
 configFile = os.path.join(root,'etc/butc.conf')
-rnxDir = os.path.join(root,'rinex')
-tmpDir  = os.path.join(root,'tmp')
-cggttsDir = os.path.join(root,'cggtts')
-cirtDir = os.path.join(root,'cirt') # mainly used 
-db = os.path.join(root,'butcgnss.db')
+
+
 cirtSource = CIRT_REPORT 
 nPrevDays = NPREVDAYS
 updateDB = True
@@ -540,6 +537,9 @@ if 'main:root' in cfg:
 	if not tmpPath.is_absolute():
 		root = os.path.join(home,root)
 
+tmpDir  = os.path.join(root,'tmp')
+cggttsDir = os.path.join(root,'cggtts')
+
 if 'main:window size' in cfg:
 	winSize = int(cfg['main:window size'])
 	ottp.Debug(f'REFSYS averaging window = {winSize} hours')
@@ -561,6 +561,7 @@ if 'main:clock' in cfg:
 if ('main:root certificate' in cfg):
 	rootCert= cfg['main:root certificate']
 
+db = os.path.join(root,'butcgnss.db')
 if ('database:file' in cfg):
 	db = ottp.MakeAbsoluteFilePath(cfg['database:file'],root,os.path.join(home,'database'))
 
@@ -572,7 +573,8 @@ if 'rinex:path' in cfg:
 	staName = cfg['rinex:station name']
 	rnxVersion = int(cfg['rinex:version'])
 
-if args.cirt_dir: # root path defined now
+cirtDir = os.path.join(root,'cirt') 
+if args.cirt_dir:
 	cirtDir = ottp.MakeAbsolutePath(args.cirt_dir,root)
 
 # Connect to the database
