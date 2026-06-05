@@ -60,7 +60,7 @@ try:
 except ImportError:
 	sys.exit('ERROR: Must install rinexlib\n eg openttp/software/system/installsys.py -i rinexlib')
 	
-VERSION = '0.15.1'
+VERSION = '0.16.0'
 AUTHORS = 'Michael Wouters'
 
 SQRT2 = math.sqrt(2)
@@ -450,6 +450,7 @@ cirtDir = os.path.join(root,'cirt') # mainly used
 db = os.path.join(root,'butcgnss.db')
 cirtSource = CIRT_REPORT 
 nPrevDays = NPREVDAYS
+updateDB = True
 
 lab = 'AUS'
 httpRequest = 'https://webtai.bipm.org/api/v1.0/get-data.html?'
@@ -471,6 +472,7 @@ parser.add_argument('--debug','-d',help='debug (to stderr)',action='store_true')
 parser.add_argument('--cirt',help='source of data for Circular T (webapi,report,download)')
 parser.add_argument('--cirt-dir',help='local directory containing  Circular T data (report,download)')
 parser.add_argument('--nprev',help='number of previous days to process',default=nPrevDays)
+parser.add_argument('--no-update',help='do not update the database',action='store_true')
 parser.add_argument('--version','-v',help='show version and exit',action='store_true')
 
 args = parser.parse_args()
@@ -500,6 +502,9 @@ debug = args.debug
 ottp.SetDebugging(debug)
 cggtts.SetWarnings(debug)
 
+if args.no_update:
+	updateDB = False
+	
 # If an MJD range is not specified then
 # the processed range is the previous day
 # and 60 or so days before that to pick up Circular T
@@ -872,9 +877,15 @@ for m in newData:
 	valscmd += ')\n'
 
 	cmd = inscmd + valscmd + 'ON CONFLICT(mjd)\n' + 'DO UPDATE SET' + updateSet+ ';\n' # this allows insert of new row/update of existing row
-	curs.execute(cmd)
+	if updateDB:
+		curs.execute(cmd)
 	
-dbc.commit()
+if updateDB:
+	ottp.Debug('Committing to DB')
+	dbc.commit()
+else:
+	ottp.Debug('Database was not updated')
+	
 curs.close()
 dbc.close()
 
