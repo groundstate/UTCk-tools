@@ -44,7 +44,7 @@ try:
 except ImportError:
 	sys.exit('ERROR: Must install ottplib\n eg openttp/software/system/installsys.py -i ottplib')
 
-VERSION = '0.2.0'
+VERSION = '0.3.0'
 AUTHORS = 'Michael Wouters'
 
 # ------------------------------------------
@@ -103,9 +103,6 @@ root = home
 
 httpRequest = 'https://webtai.bipm.org/api/v1.0/get-data.html?'
 rootCert = None # if you use an empty string, this will skip SSL verification which is a bad thing
-
-emailRecipients = 'time@measurement.gov.au'
-emailSender = 'time@measurement.gov.au'
 SMTPserver = 'localhost'
 
 checkingPath = os.path.join(root,'report/checking')
@@ -123,10 +120,10 @@ parser.add_argument('--config','-c',help='use an alternate configuration file',d
 
 parser.add_argument('--debug','-d',help='debug (to stderr)',action='store_true')
 parser.add_argument('--display',help='display plots',action='store_true')
-parser.add_argument('--email',help='email data',action='store_true')
+parser.add_argument('--email',help='email report for checking',action='store_true')
 parser.add_argument('--version','-v',help='show version and exit',action='store_true')
-parser.add_argument('--month','-m',help='create a report for the given month 1..12 (current year assumed)')
-parser.add_argument('--year','-y',help='create a report for the given year (need to specify month too!)')
+parser.add_argument('--month','-m',help='create a report for the given month 1..12')
+parser.add_argument('--year','-y',help='create a report for the given year')
 
 args = parser.parse_args()
 
@@ -149,18 +146,22 @@ if (args.config):
 debug = args.debug
 ottp.SetDebugging(debug)
 
-cfg=ottp.Initialise(configFile,['main:gnss','checking:path'])
+cfg=ottp.Initialise(configFile,['main:gnss','checking:path','main:email recipients','main:email sender'])
 
 gnss = cfg['main:gnss'].split(',')
 gnss = [g.strip() for g in gnss] 
 
+if 'main:root' in cfg:
+	root = cfg['main:root']
+	# If the root is not absolute, prepend the user's home directory
+	tmpPath = Path(root)
+	if not tmpPath.is_absolute():
+		root = os.path.join(home,root)
+
 checkingPath = ottp.MakeAbsolutePath(cfg['checking:path'],root)
 
-if ('main:email recipients' in cfg):
-	recipients = cfg['main:email recipients']
-
-if ('main:email sender' in cfg):
-	emailSender = cfg['main:email sender']
+recipients =  cfg['main:email recipients']
+emailSender = cfg['main:email sender']
 
 if ('main:smtp server' in cfg):
 	SMTPserver = cfg['main:smtp server']
@@ -190,6 +191,19 @@ if mmStop <= 0:
 	
 _,lastDayOfMonth = calendar.monthrange(yyyyStop,mmStop)
 
+if (args.month is not None) != (args.year is not None):
+	ottp.ErrorExit('You need to specify --month and --year')
+else:
+	yyyy = int(args.year)
+	mm = int(args.month)
+	
+	mmStart = mm
+	yyyyStart = yyyy
+	mmStop = mm
+	yyyyStop = yyyy
+	
+	_,lastDayOfMonth = calendar.monthrange(yyyyStop,mmStop)
+	
 # If this has not been run manually then we do checks
 if not(args.month):
 	
@@ -224,21 +238,7 @@ if not(args.month):
 	if latestNewData == -1:
 		ottp.Debug('No unreleased data')
 		sys.exit(0)
-	
-if args.year:
-	if not args.month:
-		ottp.ErrorExit('You need to specify the month as well (--month 1..12)')
 
-if args.month: # manually specified a single month 
-	if args.year:
-		yyyy = int(args.year)
-	mm = int(args.month)
-	mmStart = mm
-	yyyyStart = yyyy
-	mmStop = mm
-	yyyyStop = yyyy
-	_,lastDayOfMonth = calendar.monthrange(yyyyStop,mmStop)
-	
 ottp.Debug(f'{mmStart} {yyyyStart},{mmStop} {yyyyStop}')
 
 startMJD = ottp.MJD(datetime(yyyyStart,mmStart,1,0,0,0,tzinfo=timezone.utc).timestamp())
