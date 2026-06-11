@@ -51,16 +51,16 @@ except ImportError:
 from cggttslib import CGGTTS
 
 try:
-	import ottplib   as ottp
+	import ottplib as ottp
 except ImportError:
 	sys.exit('ERROR: Must install ottplib\n eg openttp/software/system/installsys.py -i ottplib')
 
 try:
-	import rinexlib   as rinex
+	import rinexlib as rinex
 except ImportError:
 	sys.exit('ERROR: Must install rinexlib\n eg openttp/software/system/installsys.py -i rinexlib')
 	
-VERSION = '0.16.1'
+VERSION = '0.17.0'
 AUTHORS = 'Michael Wouters'
 
 SQRT2 = math.sqrt(2)
@@ -79,20 +79,20 @@ U_NAVMSG_GNSS = {'BDS': 0.2, 'GAL': 0.1 ,'GLO':1.2, 'GPS': 1.3}
 
 CLOCK_5071_STD = 1 # standard model
 CLOCK_5071_HPT = 2 # high performance model 
-CLOCK_MASER    = 3
+CLOCK_MASER    = 3 # TODO
 
 # Indices for computed data array
-D_UTCK_BUTC = 0
-U_UTCK_BUTC = 1
+D_UTCK_BUTC = 0 # delta
+U_UTCK_BUTC = 1 # uncertainty
 D_UTC_BUTC  = 2
 U_UTC_BUTC  = 3
 
-CIRT_REF_ISSUE = 421
-CIRT_REF_MJD   = 59944
+CIRT_REF_ISSUE = 421   # sets reference for computing the Circular T issue number
+CIRT_REF_MJD   = 59944 #
 
 CIRT_WEB_API  = 0
 CIRT_REPORT   = 1
-CIRT_DOWNLOAD = 2
+CIRT_WEB_API_DOWNLOAD = 2
 
 LEAPSECS = 18 # sometimes the number of leap seconds is not present in the navigation file
 
@@ -265,7 +265,7 @@ def GetRefsys(cgBef,cgAft,winSize):
 # A current difficulty is that the Web api only returns the total uncertainty
 # For most labs though uA << uB so uB = uTotal
 # ---------------------------------------------
-def FetchUTCkLocal(lab,startMJD,stopMJD):
+def ReadUTCkLocal(lab,startMJD,stopMJD):
 	# Code for testing - be kind to the BIPM web server
 	ottp.Debug(f'Fetching Circular T data for {lab} from local file');
 	data = {}
@@ -285,7 +285,7 @@ def FetchUTCkLocal(lab,startMJD,stopMJD):
 	return data,firstMJD,lastMJD
 
 # ---------------------------------------------
-def FetchUTCkRemote(lab,startMJD,stopMJD):
+def GetUTCkRemote(lab,startMJD,stopMJD):
 	ottp.Debug(f'Fetching Circular T data for {lab} from BIPM');
 	ottp.Debug(f'{httpRequest}scale=utc&lab={lab}&mjd1={startMJD}&mjd2={stopMJD}&outfile=txt')
 	try:
@@ -454,13 +454,12 @@ httpRequest = 'https://webtai.bipm.org/api/v1.0/get-data.html?'
 rootCert = None # if you use an empty string, this will skip SSL verification which is a bad thing
 
 winSize = REFSYS_AVG_WINDOW
-
 clockModel = CLOCK_5071_STD
 
 if ottp.LibMajorVersion() >= 0 and ottp.LibMinorVersion() < 2: 
 	sys.exit('Need ottplib minor version >= 2')
 
-examples='TO DO'
+examples='Typically this will be run automatically, with no options. Useful options for debugging are --debug, --dry-run.'
 parser = argparse.ArgumentParser(description='Generate UTC(k) - bUTC_GNSS and UTC - bUTC_GNSS ',
 	formatter_class=argparse.RawDescriptionHelpFormatter,epilog=examples)
 parser.add_argument('mjd',nargs = '*',help='first MJD [last MJD] (if not given, the MJD of the previous day is used as the last MJD)')
@@ -469,7 +468,7 @@ parser.add_argument('--debug','-d',help='debug (to stderr)',action='store_true')
 parser.add_argument('--cirt',help='source of data for Circular T (webapi,report,download)')
 parser.add_argument('--cirt-dir',help='local directory containing  Circular T data (report,download)')
 parser.add_argument('--nprev',help='number of previous days to process',default=nPrevDays)
-parser.add_argument('--no-update',help='do not update the database',action='store_true')
+parser.add_argument('--dry-run',help='dry run - do not update the database',action='store_true')
 parser.add_argument('--version','-v',help='show version and exit',action='store_true')
 
 args = parser.parse_args()
@@ -489,7 +488,7 @@ if (args.cirt):
 	elif args.cirt == 'report':
 		cirtSource = CIRT_REPORT
 	elif args.cirt == 'download':
-		cirtSource = CIRT_DOWNLOAD
+		cirtSource = CIRT_WEB_API_DOWNLOAD
 	else:
 		ottp.ErrorExit(f'Bad option --cirt {args.cirt}')
 
@@ -499,7 +498,7 @@ debug = args.debug
 ottp.SetDebugging(debug)
 cggtts.SetWarnings(debug)
 
-if args.no_update:
+if args.dry_run:
 	updateDB = False
 	
 # If an MJD range is not specified then
@@ -530,20 +529,28 @@ cfg=ottp.Initialise(configFile,['main:gnss'])
 gnss = cfg['main:gnss'].split(',')
 gnss = [g.strip() for g in gnss] 
 
-if 'main:root' in cfg:
-	root = cfg['main:root']
+if 'paths:root' in cfg:
+	root = cfg['paths:root']
 	# If the root is not absolute, prepend the user's home directory
 	tmpPath = Path(root)
 	if not tmpPath.is_absolute():
 		root = os.path.join(home,root)
+ottp.Debug(f'root path = {root}')
 
 tmpDir  = os.path.join(root,'tmp')
-cggttsDir = os.path.join(root,'cggtts')
+if 'paths:tmp' in cfg:
+	tmpDir = ottp.MakeAbsolutePath(cfg['paths:tmp'],root)
+ottp.Debug(f'tmp path = {tmpDir}')
+
+cggttsDir = os.path.join(root,'cggtts') # default - can be overridden per GNSS
+if 'paths:cggttsDir' in cfg:
+	cggttsDir = ottp.MakeAbsolutePath(cfg['paths:cggtts'],root)
+ottp.Debug(f'cggtts path = {cggttsDir}')
 
 if 'main:window size' in cfg:
 	winSize = int(cfg['main:window size'])
-	ottp.Debug(f'REFSYS averaging window = {winSize} hours')
-	
+ottp.Debug(f'REFSYS averaging window = {winSize} hours')
+
 if 'main:lab' in cfg:
 	lab = cfg['main:lab']
 	
@@ -564,6 +571,7 @@ if ('main:root certificate' in cfg):
 db = os.path.join(root,'butcgnss.db')
 if ('database:file' in cfg):
 	db = ottp.MakeAbsoluteFilePath(cfg['database:file'],root,os.path.join(home,'database'))
+ottp.Debug(f'database = {db}')
 
 if 'rinex:path' in cfg:
 	rnxDir = ottp.MakeAbsolutePath(cfg['rinex:path'],root)
@@ -572,10 +580,22 @@ if 'rinex:path' in cfg:
 		ottp.ErrorExit('Missing entries in configuration file')
 	staName = cfg['rinex:station name']
 	rnxVersion = int(cfg['rinex:version'])
+ottp.Debug(f'RINEX path = {rnxDir}')
 
-cirtDir = os.path.join(root,'cirt') 
+cirtDir = os.path.join(root,'cirt')
+if 'paths:circular t' in cfg:
+	cirtDir = ottp.MakeAbsolutePath(cfg['paths:circular t'],root)
+	
 if args.cirt_dir:
 	cirtDir = ottp.MakeAbsolutePath(args.cirt_dir,root)
+ottp.Debug(f'Circular T path = {cirtDir}')
+
+# FIXME when an MJD range is specified, this may need to be extended backwards 
+# to get a reported day ?
+ottp.Debug(f'Processing range is {startMJD} - {stopMJD}')
+
+# Configuration done
+ottp.Debug('--> configuration done\n')
 
 # Connect to the database
 ottp.Debug(f'Connecting to the database {db}')
@@ -602,16 +622,10 @@ curs.execute(
 		"RELEASE_UTC INTEGER)"
 )
 
-ottp.Debug(f'Processing range is {startMJD} - {stopMJD}')
-
 # Initial guess on the range of Circular T to ask for is
 # [startMJD -7, stopMJD + 7] say
-
 cirtStartMJD = startMJD - 7
 cirtStopMJD  = stopMJD  + 7
-
-# FIXME when an MJD range is specified, this may need to be extended backwards 
-# to get a reported day ?
 
 ottp.Debug(f'Getting Circular T data for {cirtStartMJD} - {cirtStopMJD}')
 
@@ -625,16 +639,16 @@ if cirtSource == CIRT_WEB_API:
 	# Circular T data are downloaded each run. 
 	# One year of data is a 2K file so we shouldn't worry too much about 
 	# about the load on the web server
-	cirt, firstMJD,lastMJD = FetchUTCkRemote(lab,cirtStartMJD,cirtStopMJD)	
+	cirt, firstMJD,lastMJD = GetUTCkRemote(lab,cirtStartMJD,cirtStopMJD)	
 elif cirtSource == CIRT_REPORT:
 	cirt, firstMJD,lastMJD = ReadCircularT(lab,cirtStartMJD,cirtStopMJD)	
-elif cirtSource == CIRT_DOWNLOAD:
+elif cirtSource == CIRT_WEB_API_DOWNLOAD:
 	# Same problem with uA and uB as with download via Web API
 	# This option is mainly here for debugging without constant querying of the BIPM Web API
-	cirt,firstMJD,lastMJD = FetchUTCkLocal(lab,cirtStartMJD,cirtStopMJD)
+	cirt,firstMJD,lastMJD = ReadUTCkLocal(lab,cirtStartMJD,cirtStopMJD)
 
 if not cirt:
-	sys.exit('No Circular T data available')
+	sys.exit('No Circular T data are available!') # TODO update UTCk - bUTC if uA and uB configured ? 
 	
 cirtAsList = list(cirt.values())
 
@@ -646,7 +660,7 @@ prevCGGTTSFile['GPS'] = CGGTTS(None,None)
 
 newData = {}
 
-# Get UTC predictions for each MJD from the navigation files
+# Get broadcast UTC predictions for each MJD from the navigation files
 
 timeSysCorr={}      # holds TIMESYS CORR for each MJD
 mjd = startMJD - 2  # start two days earlier because of 1. immediate increment and 2. need the previous day's data
