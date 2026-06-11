@@ -44,7 +44,7 @@ try:
 except ImportError:
 	sys.exit('ERROR: Must install ottplib\n eg openttp/software/system/installsys.py -i ottplib')
 
-VERSION = '0.3.0'
+VERSION = '0.3.1'
 AUTHORS = 'Michael Wouters'
 
 # ------------------------------------------
@@ -108,7 +108,6 @@ SMTPserver = 'localhost'
 checkingPath = os.path.join(root,'report/checking')
 
 configFile = os.path.join(root,'etc/butc.conf')
-tmpDir  = os.path.join(root,'tmp')
 
 if ottp.LibMajorVersion() >= 0 and ottp.LibMinorVersion() < 2: 
 	sys.exit('Need ottplib minor version >= 2')
@@ -146,25 +145,25 @@ if (args.config):
 debug = args.debug
 ottp.SetDebugging(debug)
 
-cfg=ottp.Initialise(configFile,['main:gnss','checking:path','main:email recipients','main:email sender'])
+cfg=ottp.Initialise(configFile,['main:gnss','report:checking path','email:recipients','email:sender'])
 
 gnss = cfg['main:gnss'].split(',')
 gnss = [g.strip() for g in gnss] 
 
-if 'main:root' in cfg:
-	root = cfg['main:root']
+if 'paths:root' in cfg:
+	root = cfg['paths:root']
 	# If the root is not absolute, prepend the user's home directory
 	tmpPath = Path(root)
 	if not tmpPath.is_absolute():
 		root = os.path.join(home,root)
 
-checkingPath = ottp.MakeAbsolutePath(cfg['checking:path'],root)
+checkingPath = ottp.MakeAbsolutePath(cfg['report:checking path'],root)
 
-recipients =  cfg['main:email recipients']
-emailSender = cfg['main:email sender']
+recipients =  cfg['email:recipients']
+emailSender = cfg['email:sender']
 
-if ('main:smtp server' in cfg):
-	SMTPserver = cfg['main:smtp server']
+if ('email:smtp server' in cfg):
+	SMTPserver = cfg['email:smtp server']
 
 if ('main:root certificate' in cfg):
 	rootCert= cfg['main:root certificate']
@@ -193,7 +192,7 @@ _,lastDayOfMonth = calendar.monthrange(yyyyStop,mmStop)
 
 if (args.month is not None) != (args.year is not None):
 	ottp.ErrorExit('You need to specify --month and --year')
-else:
+elif (args.month and args.year):
 	yyyy = int(args.year)
 	mm = int(args.month)
 	
