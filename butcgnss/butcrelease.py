@@ -29,6 +29,7 @@ import calendar
 from datetime import datetime
 from datetime import timezone
 import os
+from pathlib import Path
 import sqlite3
 import sys
 import time
@@ -43,7 +44,7 @@ try:
 except ImportError:
 	sys.exit('ERROR: Must install ottplib\n eg openttp/software/system/installsys.py -i ottplib')
 
-VERSION = '0.2.0'
+VERSION = '0.3.0'
 AUTHORS = 'Michael Wouters'
 
 NPREVDAYS = 60
@@ -87,15 +88,18 @@ if (args.config):
 debug = args.debug
 ottp.SetDebugging(debug)
 
-
 cfg=ottp.Initialise(configFile,['main:gnss'])
 
-if 'main:root' in cfg:
-	root = cfg['main:root']
+if 'paths:root' in cfg:
+	root = cfg['paths:root']
+	# If the root is not absolute, prepend the user's home directory
+	tmpPath = Path(root)
+	if not tmpPath.is_absolute():
+		root = os.path.join(home,root)
+ottp.Debug(f'root path = {root}')
 	
 if ('database:file' in cfg):
 	db = ottp.MakeAbsoluteFilePath(cfg['database:file'],root,os.path.join(home,'database'))
-
 
 mjdToday  = ottp.MJD(time.time())
 stopMJD   = mjdToday - 1 # previous day
