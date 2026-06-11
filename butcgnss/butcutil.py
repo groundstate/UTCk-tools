@@ -44,11 +44,8 @@ try:
 except ImportError:
 	sys.exit('ERROR: Must install ottplib\n eg openttp/software/system/installsys.py -i ottplib')
 
-VERSION = '0.0.0'
+VERSION = '0.1.0'
 AUTHORS = 'Michael Wouters'
-
-MIN_UTCK_U = 5
-MIN_UTC_U  = 6
 
 # ------------------------------------------
 def ShowVersion():
@@ -69,7 +66,7 @@ parser = argparse.ArgumentParser(description='Utility for eg querying the databa
 parser.add_argument('mjd',nargs = '*',help='first MJD [last MJD] (if not given, the MJD of the previous day is used as the last MJD)')
 parser.add_argument('--month','-m',help='specify month 1..12' )
 parser.add_argument('--year','-y',help='specify year')
-parser.add_argument('--gnss','-g',help='specify gnss(s) to extract (BDS,GAL,GLO,BDS)')
+parser.add_argument('--gnss','-g',help='comma-separated list of GNSS to extract (BDS,GAL,GLO,BDS)')
 parser.add_argument('--config','-c',help='use an alternate configuration file',default=configFile)
 parser.add_argument('--debug','-d',help='debug (to stderr)',action='store_true')
 parser.add_argument('--version','-v',help='show version and exit',action='store_true')
@@ -91,13 +88,12 @@ ottp.SetDebugging(debug)
 cfg=ottp.Initialise(configFile,['main:gnss'])
 
 gnss = cfg['main:gnss'].split(',')
-
 if args.gnss:
 	gnss = args.gnss.split(',')
 gnss = [g.strip() for g in gnss] 
 
-if 'main:root' in cfg:
-	root = cfg['main:root']
+if 'paths:root' in cfg:
+	root = cfg['paths:root']
 	# If the root is not absolute, prepend the user's home directory
 	tmpPath = Path(root)
 	if not tmpPath.is_absolute():
@@ -106,8 +102,8 @@ if 'main:root' in cfg:
 ottp.Debug(f'root path = {root}')
 	
 tmpDir  = os.path.join(root,'tmp')
-if 'main:tmp path' in cfg:
-	tmpDir = ottp.MakeAbsolutePath(cfg['main:tmp path'],root)
+if 'paths:tmp' in cfg:
+	tmpDir = ottp.MakeAbsolutePath(cfg['paths:tmp'],root)
 	
 if 'main:lab' in cfg:
 	lab = cfg['main:lab']
@@ -133,7 +129,7 @@ if (args.mjd):
 
 if (args.month is not None) != (args.year is not None):
 	ottp.ErrorExit('You need to specify --month and --year')
-else:
+elif (args.month and args.year):
 	yyyy = int(args.year)
 	mm = int(args.month)
 	
@@ -166,13 +162,13 @@ for m in range(startMJD,stopMJD+1):
 		
 		if x:
 			if x[0]==None: # no data
-				outputLine += f'{missingData:>9}{missingData:>5}{missingData:>9}{missingData:>5}'
+				outputLine += f'{missingData:>}{missingData:>}{missingData:>}{missingData:>}'
 			elif x[2] == None : # no UTC data
-				outputLine += '{:>9} {:>5} {:>9} {:>5}'.format(x[0],x[1],missingData,missingData)
+				outputLine += '{:>} {:>} {:>} {:>}'.format(x[0],x[1],missingData,missingData)
 			else: # Yay got it all
-				outputLine += '{:>9} {:>5} {:>9} {:>5}'.format(x[0],x[1],x[2],x[3])
+				outputLine += '{:>} {:>} {:>} {:>}'.format(x[0],x[1],x[2],x[3])
 		else:
-			outputLine += f'{missingData:>9}{missingData:>5}{missingData:>9}{missingData:>5}'
+			outputLine += f'{missingData:>}{missingData:>}{missingData:>}{missingData:>}'
 		if gi < len(gnss):
 				outputLine += ' '
 
