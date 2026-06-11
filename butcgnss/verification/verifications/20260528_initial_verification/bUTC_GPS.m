@@ -1,6 +1,8 @@
 %
 % Note that the MATLAB library CGGTTS is available from
-% 
+% https://github.com/groundstate/time-transfer-tools
+% Version 0.1.0
+%
 
 %% Setup
 BDS=1;
@@ -21,7 +23,7 @@ GNSSName = GNSS_NAMES(iGNSS);
 rootDir = "~/src/UTCk-tools/butcgnss/verification/data";
 leapSecs = 18;
 GPSEpoch = 44244;
-halfWin = 12.0;
+halfWin = 1.0;
 
 %% Read CGGTTS data, filter and eyeball it
 cg = CGGTTS(startMJD-1,stopMJD+1,rootDir+"/cggtts/",GNSSCode + "ZPT13",'NamingConvention','BIPM','RemoveBadTracks','yes');
@@ -62,9 +64,20 @@ stdrefsys=zeros(stopMJD - startMJD + 1,2);
 for mjd=startMJD:stopMJD  
     win = (refsys(:,1) >= mjd - halfWin/24.0) & (refsys(:,1) <= mjd + halfWin/24.0);
     xrefsys = refsys(win,:,:);
-    avrefsys(i,:) = [mjd,mean(xrefsys(:,2))];
-    stdrefsys(i,:) = [mjd,std(xrefsys(:,2))];
-    i = i + 1;
+    % fprintf("%g %g %g\n",sum(win),xrefsys(1,2),xrefsys(end,2));
+    nBef = length(xrefsys);
+    % Remove outliers
+    rs = xrefsys(:,2);
+    rs = sort(rs);
+    nChop = ceil(0.05*length(rs));
+    filterMedian = median(rs(nChop+1:end-nChop));
+    filterStd = std(rs(nChop+1:end-nChop));
+    bad = abs(rs - filterMedian) >= 6*filterStd;
+    rs(bad,:)=[];
+    avrefsys(i,:)  = [mjd,mean(rs)];
+    stdrefsys(i,:) = [mjd,std(rs)];
+    % fprintf('%d %g %g->%g %g %g %g %g\n',mjd,sum(bad),nBef,length(rs),filterMedian, filterStd,avrefsys(i,2),stdrefsys(i,2));
+    i = i +1;
 end
 
 % and plot it
@@ -177,13 +190,22 @@ for mjd=startMJD:stopMJD
   uNavMsg = U_NAVMSG(iGNSS); 
   u_UTCk_bUTC(i) = sqrt(uBCirT^2 + ttNoise^2 + uCalGNSS^2 + uNavMsg^2);
   u_UTC_bUTC(i)  = sqrt(uCirTExtrapolation^2 + uClockInstability^2 + uACirT^2 + uBCirT^2 + ttNoise^2 + uCalGNSS^2 + uNavMsg^2);
-  fprintf('%d %g %g [%g %g %g %g]\n',mjd,u_UTCk_bUTC(i),u_UTC_bUTC(i),ttNoise,uCirTExtrapolation,uClockInstability,uCirTExtrapolation);
+  % fprintf('%d %g %g [%g %g %g %g]\n',mjd,u_UTCk_bUTC(i),u_UTC_bUTC(i),ttNoise,uCirTExtrapolation,uClockInstability,uCirTExtrapolation);
   i = i + 1;
 end
 
 mjd = startMJD:stopMJD;
 for i=1:length(UTCk_bUTC)
-    fprintf('%5d % 10.5g +/- % 7.5g  % 10.5g +/- % 7.5g\n',mjd(i),UTCk_bUTC(i),u_UTCk_bUTC(i),UTC_bUTC(i),u_UTC_bUTC(i));
+    %fprintf('%5d % 10.5g +/- % 7.5g  % 10.5g +/- % 7.5g\n',mjd(i),UTCk_bUTC(i),u_UTCk_bUTC(i),UTC_bUTC(i),u_UTC_bUTC(i));
+end
+
+% Now compare with the output of butcupdate.py
+verData = load(GNSSName + ".PTB.dat");
+% Columns are MJD UTCk-buTC u UTC-bUTC u
+for i=1:length(verData)
+    errUTCk = verData(i,2) - UTCk_bUTC(i);
+    %fprintf('%5d %g\n',mjd(i),UTCk_bUTC(i),u_UTCk_bUTC(i),UTC_bUTC(i),u_UTC_bUTC(i));
+    fprintf('%5d %g\n',verData(i,1),errUTCk);
 end
 
 function [uA, uB, tau] = FindNearestCirtU(utcutck,mjd)

@@ -1,0 +1,4 @@
+Notes:
+1. All uncertainties are unexpanded, with a coverage factor k=1
+2. UTC reporting dates are MJDs that end with 4 and 9. Between these
+  dates, the value of UTC(AUS) is interpolated. 
