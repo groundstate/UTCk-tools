@@ -23,7 +23,7 @@ GNSSName = GNSS_NAMES(iGNSS);
 rootDir = "~/src/UTCk-tools/butcgnss/verification/data";
 leapSecs = 18;
 GPSEpoch = 44244;
-halfWin = 1.0;
+halfWin = 12.0;
 
 %% Read CGGTTS data, filter and eyeball it
 cg = CGGTTS(startMJD-1,stopMJD+1,rootDir+"/cggtts/",GNSSCode + "ZPT13",'NamingConvention','BIPM','RemoveBadTracks','yes');
