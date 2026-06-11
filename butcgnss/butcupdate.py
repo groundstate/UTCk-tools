@@ -29,12 +29,14 @@ import calendar
 from datetime import datetime
 from datetime import timezone
 import math 
+import numpy as np
 import os
 from pathlib import Path
 import re
 import requests
 import shutil
 import sqlite3
+import statistics
 import sys
 import time
 
@@ -60,7 +62,7 @@ try:
 except ImportError:
 	sys.exit('ERROR: Must install rinexlib\n eg openttp/software/system/installsys.py -i rinexlib')
 	
-VERSION = '0.17.0'
+VERSION = '0.18.0'
 AUTHORS = 'Michael Wouters'
 
 SQRT2 = math.sqrt(2)
@@ -196,73 +198,78 @@ def DeltaGNSSUTC(gnss,Wn,Dn,leapSecs,tsCorr):
 	return deltaUTC
 
 # ---------------------------------------------
-def GetRefsys(cgBef,cgAft,winSize):
+def EstimateRefSys(cgBef,cgAft,winSize):
 
+	ottp.Debug('EstimateRefSys()')
+	
 	wSz = 1800*winSize # winSize is in hours
 	refsys0 = None
 	uRefsys0 = None
 	nTracks = 0
 	
-	tBef = tAft = 0
+	iBef = iAft = 0
 	nBef = nAft = 0
 
-	# Seems messy compared with a concatenating tha data into a single array
-	# it does allow the two CGGTTS files to have different formats
+	# Seems messy but it does allow the two CGGTTS files to have different formats ...
 	
+	# Find the section of the array corresponding to the window
 	if cgBef.fileName:
 		tStart = 86400 - wSz
 		ntrks = len(cgBef.tracks)
-		for t in range(0,ntrks):
-			if cgBef.tracks[t][cgBef.STTIME] >= tStart: # don't worry about the 390 s offset
-				tBef = t 
-				nBef = ntrks - tBef
+		for i in range(0,ntrks):
+			if cgBef.tracks[i][cgBef.STTIME] >= tStart: # don't worry about the 390 s offset
+				iBef = i 
+				nBef = ntrks - iBef
 				break
 				
 	if cgAft.fileName:
 		tStop = wSz
-		ntrks = len(cgBef.tracks)
-		for t in range(0,ntrks):
-			if cgAft.tracks[t][cgBef.STTIME] >= tStop:
-				tAft = t - 1
-				nAft = tAft + 1
+		ntrks = len(cgAft.tracks)
+		for i in range(0,ntrks):
+			if cgAft.tracks[i][cgAft.STTIME] > tStop:
+				iAft = i - 1
+				nAft = iAft + 1
 				break
 		
-	if not(nBef and nAft):
+	if not(nBef and nAft): # no data in window
 		return refsys0,uRefsys0,nTracks
 	
-	refsys0 = 0
+	# There are rare outliers due to bad satellites
+	# Remove these 
 	
+	# First, extract REFSYS
+	ltrks = None
 	if nBef > 0:
-		ntrks = len(cgBef.tracks)
-		for t in range(tBef,ntrks):
-			#print(cgBef.tracks[t][cgBef.STTIME],cgBef.tracks[t][cgBef.REFSYS])
-			refsys0 = refsys0 + cgBef.tracks[t][cgBef.REFSYS]
+		ltrks = [row[cgBef.REFSYS] for row in cgBef.tracks[iBef:]]
+		#print(ltrks)
 	if nAft > 0:
-		ntrks = len(cgAft.tracks)
-		for t in range(0,tAft+1):
-			#print(cgAft.tracks[t][cgAft.STTIME],cgAft.tracks[t][cgAft.REFSYS])
-			refsys0 = refsys0 + cgAft.tracks[t][cgAft.REFSYS]
+		if nBef > 0:
+			ltrks = ltrks + [row[cgAft.REFSYS] for row in cgAft.tracks[0:iAft+1]]
+			#print([row[cgAft.REFSYS] for row in cgAft.tracks[0:iAft+1]])
+		else:
+			ltrks = [row[cgAft.REFSYS] for row in cgAft.tracks[0:iAft+1]]
+
 	
-	nTracks = nBef + nAft
-	if nTracks == 1: # wayy... too little
-		return refsys0,uRefsys0,nTracks
-		
-	refsys0 = refsys0/nTracks 
+	# and then proceed using numpy
+	trks = np.array(ltrks)
+	ottp.Debug('Before filtering: mean = {}, median = {}, sd = {}'.format(np.mean(trks),np.median(trks),np.std(trks, ddof=1) ))
+	trks.sort() # in place
+	# now chop off 5% of data at each end and re-estimate mean, median and sd
+	nTrks = len(trks)
+	nChop = round(0.05*nTrks)
+	filterAvg = np.mean(trks[nChop:ntrks-nChop])
+	filterStd = np.std(trks[nChop:ntrks-nChop],ddof=1)
+	filterMed = np.median(trks[nChop:ntrks-nChop])
+	ottp.Debug('Filter estimates: mean = {}, median = {}, sd = {}'.format(filterAvg,filterMed,filterStd))
 	
-	urefsys0 = 0
-	if nBef > 0:
-		ntrks = len(cgBef.tracks)
-		for t in range(tBef,ntrks):
-			urefsys0 += (refsys0 - cgBef.tracks[t][cgBef.REFSYS])**2
-	if nAft > 0:
-		ntrks = len(cgAft.tracks)
-		for t in range(0,tAft+1):
-			urefsys0 += (refsys0  - cgAft.tracks[t][cgAft.REFSYS])**2
-	
-	return refsys0,math.sqrt(urefsys0/(nTracks-1)),nTracks  # returns std dev as uncertainty for refsys0
+	# Remove anything more than 6*SD from the median
+	filteredTrks = trks[np.abs(trks - filterMed) < 6*filterStd]
+	ottp.Debug('Removed {} outliers (track count was {}, now {})'.format(len(ltrks)-len(filteredTrks),len(ltrks),len(filteredTrks)))
+	ottp.Debug('After filtering: mean = {}, median = {}, sd = {}'.format(np.mean(filteredTrks),np.median(filteredTrks),np.std(filteredTrks, ddof=1) ))
+	return np.mean(filteredTrks),np.std(filteredTrks,ddof=1),len(filteredTrks)  # returns std dev as uncertainty for refsys0
 
 # Returns Circular T in a dictionary
-# A current difficulty is that the Web api only returns the total uncertainty
+# A current difficulty is that the Web API only returns the total uncertainty
 # For most labs though uA << uB so uB = uTotal
 # ---------------------------------------------
 def ReadUTCkLocal(lab,startMJD,stopMJD):
@@ -732,8 +739,9 @@ while mjd < stopMJD :
 		
 		if fName:
 			ottp.Debug(f'Reading {fName}')
-			cgf = CGGTTS(fName,mjd)
+			cgf = CGGTTS(fName,mjd,maxSRSYS=9999.9)
 			cgf.Read()
+			print(cgf.tracks[-1])
 		else:
 			ottp.Debug('No CGGTTS file found')
 			cgf = CGGTTS(None,mjd)
@@ -746,7 +754,7 @@ while mjd < stopMJD :
 		# Calculate the average REFSYS, if we can
 		refsys0 = None
 		if prevCGGTTSFile[g].fileName or cgf.fileName:
-			refsys0,uRefsys0,nTracks = GetRefsys(prevCGGTTSFile[g],cgf,winSize)
+			refsys0,uRefsys0,nTracks = EstimateRefSys(prevCGGTTSFile[g],cgf,winSize)
 			#print(refsys0,uRefsys0,nTracks)
 		
 		if (refsys0 == None):
