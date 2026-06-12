@@ -44,7 +44,7 @@ try:
 except ImportError:
 	sys.exit('ERROR: Must install ottplib\n eg openttp/software/system/installsys.py -i ottplib')
 
-VERSION = '0.3.1'
+VERSION = '0.4.0'
 AUTHORS = 'Michael Wouters'
 
 # ------------------------------------------
@@ -57,23 +57,24 @@ def ShowVersion():
 def FetchBIPMBUTC(gnss,startMJD,stopMJD):
 	
 	ottp.Debug(f'Fetching Circular bUTC prediction data  for {gnss} from BIPM');
-	#req = f'{httpRequest}scale=b_{gnss}&mjd1={startMJD}&mjd2={stopMJD}&outfile=json'
-	#ottp.Debug(req)
-	#try:
-		#r = requests.get(req,verify=rootCert)
-	#except:
-		#ottp.Debug('http request failed')
-		#return None,None,None
-	
-	#d = json.loads(r.text)
-	#if not(d['errorcode'] == 0):
-		#ottp.Debug(f"http request return error {d['errorcode']}")
-		#return None,None,None
-	
-	#TEMPORARY CODE
-	with open(os.path.join(home,'database/butc_gps.json'), 'r', encoding='utf-8') as file:
-		d = json.load(file)
-
+	if debug:
+		#TEMPORARY CODE
+		with open(os.path.join(root,'database/butc_gps.json'), 'r', encoding='utf-8') as file:
+			d = json.load(file)
+	else:
+		req = f'{httpRequest}scale=b_{gnss}&mjd1={startMJD}&mjd2={stopMJD}&outfile=json'
+		ottp.Debug(req)
+		try:
+			r = requests.get(req,verify=rootCert)
+		except:
+			ottp.Debug('http request failed')
+			return None,None,None
+		
+		d = json.loads(r.text)
+		if not(d['errorcode'] == 0):
+			ottp.Debug(f"http request return error {d['errorcode']}")
+			return None,None,None
+		
 	return np.array(d['data'][0]['x']),np.array(d['data'][0]['y']),np.array(d['data'][0]['unc'],dtype=float)
 
 def ReadLabBUTC(db,g,startMJD,stopMJD):
@@ -120,6 +121,7 @@ parser.add_argument('--config','-c',help='use an alternate configuration file',d
 parser.add_argument('--debug','-d',help='debug (to stderr)',action='store_true')
 parser.add_argument('--display',help='display plots',action='store_true')
 parser.add_argument('--email',help='email report for checking',action='store_true')
+parser.add_argument('--force',help='force creation of a new report',action='store_true')
 parser.add_argument('--version','-v',help='show version and exit',action='store_true')
 parser.add_argument('--month','-m',help='create a report for the given month 1..12')
 parser.add_argument('--year','-y',help='create a report for the given year')
@@ -160,7 +162,7 @@ if 'paths:root' in cfg:
 checkingPath = ottp.MakeAbsolutePath(cfg['report:checking path'],root)
 
 recipients =  cfg['email:recipients']
-emailSender = cfg['email:sender']
+sender = cfg['email:sender']
 
 if ('email:smtp server' in cfg):
 	SMTPserver = cfg['email:smtp server']
@@ -209,7 +211,7 @@ if not(args.month):
 	# Do we need to do this ?
 	# Is last month's PDF plot already there?
 	fPath  = Path(os.path.join(checkingPath,f'butcplot_{yyyyStop}{mmStop:02d}.pdf'))
-	if fPath.is_file():
+	if fPath.is_file() and (not args.force):
 		ottp.Debug(f'butcplot_{yyyyStop}{mmStop:02d}.pdf already created - nothing to do')
 		sys.exit(0)
 		
@@ -280,12 +282,12 @@ plotFile = os.path.join(checkingPath,f'butcplot_{yyyyStop}{mmStop:02d}.pdf')
 plt.savefig(plotFile,format='pdf',) # do this before show()
 
 if args.email:
-	
+	ottp.Debug('Sending email')
 	msg =  EmailMessage()
 	msg['Subject'] = 'bUTC_GNSS checking data for ' + calendar.month_name[mmStop]+ f' {yyyyStop}'
-	msg['From'] = emailSender
-	msg['To'] = emailRecipients
-	msg['Reply-To'] = emailSender
+	msg['From'] = sender
+	msg['To'] = recipients
+	msg['Reply-To'] = sender
 
 	msg.set_content('Save the attachments ...')
 	
@@ -299,7 +301,7 @@ if args.email:
 	
 	# Send the message via local SMTP server.
 	s = smtplib.SMTP(SMTPserver)
-	s.sendmail(emailSender,emailRecipients.split(','), msg.as_string())
+	s.sendmail(sender,recipients.split(','), msg.as_string())
 	s.quit()
 	
 if args.display:
