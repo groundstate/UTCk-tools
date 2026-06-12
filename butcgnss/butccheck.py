@@ -275,7 +275,7 @@ for gi in range(0,len(gnss)):
 			else: # Yay got it all
 				outputLine += '{:>9.2f} {:>7.2f} {:>9.2f} {:>7.2f}'.format(x[0],x[1],x[2],x[3])
 		else:
-			outputLine += f'{missingData:>9} {missingData:>9} {missingData:>9} {missingData:>9}'
+			outputLine += f'{missingData:>9} {missingData:>7} {missingData:>7} {missingData:>9}'
 
 		print(outputLine)
 		
