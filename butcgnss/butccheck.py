@@ -44,7 +44,7 @@ try:
 except ImportError:
 	sys.exit('ERROR: Must install ottplib\n eg openttp/software/system/installsys.py -i ottplib')
 
-VERSION = '0.4.0'
+VERSION = '0.5.0'
 AUTHORS = 'Michael Wouters'
 
 # ------------------------------------------
@@ -205,7 +205,8 @@ elif (args.month and args.year):
 	
 	_,lastDayOfMonth = calendar.monthrange(yyyyStop,mmStop)
 	
-# If this has not been run manually then we do checks
+# If the reporting period has been set on the command line, then we 
+# check if anything needs to be done
 if not(args.month):
 	
 	# Do we need to do this ?
@@ -216,36 +217,72 @@ if not(args.month):
 		sys.exit(0)
 		
 	# Are new UTC data available for release?
-	startMJD = ottp.MJD(datetime(yyyyStop,mmStop,1,0,0,0,tzinfo=timezone.utc).timestamp())
+	startMJD = ottp.MJD(datetime(yyyyStart,mmStart,1,0,0,0,tzinfo=timezone.utc).timestamp())
 	stopMJD =  ottp.MJD(datetime(yyyyStop,mmStop,lastDayOfMonth,0,0,0,tzinfo=timezone.utc).timestamp())
 
-	# Search backwards through the past month for unreleased data
+	# Search for unreleased data
 	ottp.Debug(f'Connecting to the database {db}')
 	dbc = sqlite3.connect(db) # this opens a connection to the database
 	curs = dbc.cursor()  
-
-	latestNewData = -1
-	for m in range(stopMJD,startMJD-1,-1):
+	firstUnreleased = -1
+	lastUnreleased= -1
+	for m in range (startMJD, stopMJD+1):
 		r = curs.execute(f'SELECT release_utc FROM butcgnss WHERE mjd={m};')
 		x = r.fetchone()
 		if x:
 			if x[0] == 0:
-				ottp.Debug(f'Most recent unreleased data is for {m}')
-				latestNewData = m
-				break
+				lastUnreleased = m
+				if firstUnreleased < 0:
+					firstUnreleased = m
+	ottp.Debug(f'Unreleased data {firstUnreleased}-{lastUnreleased}')
+
 	curs.close()
 	dbc.close()
 	
-	if latestNewData == -1:
+	if lastUnreleased == -1 and not(args.force):
 		ottp.Debug('No unreleased data')
 		sys.exit(0)
 
-ottp.Debug(f'{mmStart} {yyyyStart},{mmStop} {yyyyStop}')
+ottp.Debug(f'Month range {mmStart:02d}-{yyyyStart}->{mmStop:02d}-{yyyyStop}')
 
 startMJD = ottp.MJD(datetime(yyyyStart,mmStart,1,0,0,0,tzinfo=timezone.utc).timestamp())
 stopMJD =  ottp.MJD(datetime(yyyyStop,mmStop,lastDayOfMonth,0,0,0,tzinfo=timezone.utc).timestamp())
 
 ottp.Debug(f'Processing for {startMJD} to {stopMJD}')
+
+# Make reports for each GNSS
+
+dbc = sqlite3.connect(db) # this opens a connection to the database
+curs = dbc.cursor()   
+
+missingData = '*' 
+
+for gi in range(0,len(gnss)):
+	g = gnss[gi]
+	print(g)
+	for m in range(firstUnreleased,lastUnreleased+1):
+		
+		outputLine = f'{m:5d} ' # 17 characters
+		
+		r = curs.execute(f'SELECT UTCk_{g},UTCk_{g}_u,UTC_{g},UTC_{g}_u,release_utc from butcgnss where MJD={m};')
+		x = r.fetchone()
+		
+		if x:
+			if x[0]==None: # no data
+				outputLine += f'{missingData:>9} {missingData:>7} {missingData:>9} {missingData:>7}'
+			elif x[2] == None : # no UTC data
+				outputLine += '{:>9.2f} {:>7.2f} {:>9} {:>7}'.format(x[0],x[1],missingData,missingData)
+			else: # Yay got it all
+				outputLine += '{:>9.2f} {:>7.2f} {:>9.2f} {:>7.2f}'.format(x[0],x[1],x[2],x[3])
+		else:
+			outputLine += f'{missingData:>9} {missingData:>9} {missingData:>9} {missingData:>9}'
+
+		print(outputLine)
+		
+	print('+++++++++++++++++++++++++++++')
+	
+curs.close()
+dbc.close()
 
 # Make a plot for each GNSS
 # One page should be fine
