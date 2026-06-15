@@ -1,0 +1,23 @@
+Step 1
+Generate the time system corrections file for each GNSS:
+fgrep GLUT ../../data/rinex/BRDC* > GLO.TimeSysCorr.txt
+
+These need to be hand-edited ...
+
+Step 2
+Get Circular T UTC - bUTC_GNSS 
+https://webtai.bipm.org/api/v1.0/get-data.html?scale=b_gps&mjd1=61041&mjd2=61071&outfile=txt
+...
+
+Step 2
+Update the database:
+butcupdate.py -d -c butc.conf  --cirt report 61041 61071
+
+
+Step 3
+Extract results for each GNSS to a file:
+butcutil.py --gnss GPS -c ./butc.conf 61041 61071 > GPS.PTB.dat
+butcutil.py --gnss GAL -c ./butc.conf 61041 61071 > GAL.PTB.dat
+
+Step 4 
+Run the MATLAB scripts
