@@ -46,7 +46,7 @@ try:
 except ImportError:
 	sys.exit('ERROR: Must install ottplib\n eg openttp/software/system/installsys.py -i ottplib')
 
-VERSION = '0.6.0'
+VERSION = '0.7.0'
 AUTHORS = 'Michael Wouters'
 
 # ------------------------------------------
@@ -56,7 +56,7 @@ def ShowVersion():
 	return
 
 # ---------------------------------------------
-def FetchBIPMBUTC(gnss,startMJD,stopMJD):
+def FetchBIPMbUTC(gnss,startMJD,stopMJD):
 	
 	ottp.Debug(f'Fetching Circular bUTC prediction data  for {gnss} from BIPM');
 	if debug:
@@ -79,7 +79,7 @@ def FetchBIPMBUTC(gnss,startMJD,stopMJD):
 		
 	return np.array(d['data'][0]['x']),np.array(d['data'][0]['y']),np.array(d['data'][0]['unc'],dtype=float)
 
-def ReadLabBUTC(db,g,startMJD,stopMJD):
+def ReadUTCbUTC(db,g,startMJD,stopMJD):
 	m  = []
 	d  = []
 	u  = []
@@ -99,7 +99,29 @@ def ReadLabBUTC(db,g,startMJD,stopMJD):
 	dbc.close()
 
 	return np.array(m),np.array(d),np.array(u)
-	 
+
+
+def ReadUTCkbUTC(db,g,startMJD,stopMJD):
+	m  = []
+	d  = []
+	u  = []
+	ottp.Debug(f'Connecting to the database {db}')
+	dbc = sqlite3.connect(db) # this opens a connection to the database
+	curs = dbc.cursor()   
+
+	for mjd in range(startMJD,stopMJD+1):
+		r = curs.execute(f'SELECT UTCk_{g},UTCk_{g}_u from butcgnss where MJD={mjd};')
+		x = r.fetchone()
+		if x:
+			if not (x[0] == None):
+				m.append(mjd)
+				d.append(x[0])
+				u.append(x[1])
+	curs.close()
+	dbc.close()
+
+	return np.array(m),np.array(d),np.array(u)
+
 # ----------------------------------------------------------------------------------
 home =os.environ['HOME']
 user =os.environ['USER']
@@ -261,37 +283,62 @@ ottp.Debug(f'Processing for {startMJD} to {stopMJD}')
 # Make reports for each GNSS
 
 # Make a plot for each GNSS - do this first so they can be interleaved with the data
-fig, axs = plt.subplots(1,1,figsize=[8,8],squeeze=False ) #unsqueeze so we always get an array of axes
+fig, axs = plt.subplots(2,1,figsize=[8,10],squeeze=False ) #unsqueeze so we always get an array of axes
 #title = 'bUTC_GNSS check for ' + calendar.month_name[mmStop]+ f' {yyyyStop}\n'
 #title += os.path.basename(sys.argv[0])+ ' v' + VERSION   + ' run ' + dt.strftime('%Y-%m-%d %H:%M:%S') + '\n'
 #fig.suptitle(title,ha='left',x=0.1)
+#plt.tight_layout()
+plt.subplots_adjust(left=0.1, right=0.95, top=0.95, bottom=0.05)
 
 plotIndex = 0
 
 plots={}
 for g in gnss:
-	
-	m,d,u = FetchBIPMBUTC(g,startMJD,stopMJD) 
+
+	# Plot of BIPM and our estimate of UTC-bUTC_GNSS
+	m,d,u = FetchBIPMbUTC(g,startMJD,stopMJD) # BIPM's estimates
 	
 	axs[plotIndex,0].fill_between(m,d-u,d+u,color='palegreen')
 	axs[plotIndex,0].plot(m,d,color='g')
 	axs[plotIndex,0].scatter(m,d,s=9,marker='o',color='g',label='Circular T')
 	
-	m,d,u = ReadLabBUTC(db,g,startMJD,stopMJD)
+	m,d,u = ReadUTCbUTC(db,g,startMJD,stopMJD) # Our estimate
 	
-	axs[plotIndex,0].fill_between(m,d-u,d+u,color='lightskyblue',alpha=0.5)
-	axs[plotIndex,0].plot(m,d,color='b')
-	axs[plotIndex,0].scatter(m,d,s=9,marker='o',color='b',label = 'local')
+	axs[plotIndex,0].fill_between(m,d-u,d+u,color='violet',alpha=0.6)
+	axs[plotIndex,0].plot(m,d,color='purple')
+	axs[plotIndex,0].scatter(m,d,s=9,marker='o',color='purple',label = 'local')
 
 	axs[plotIndex,0].set_ylabel('ns')
 	axs[plotIndex,0].set_xlabel('MJD')
 	axs[plotIndex,0].set_title(f'UTC - bUTC_{g}')
 	axs[plotIndex,0].grid()
 	
+
+	# Pick out Circular T reporting days
+	mCirt = []
+	dCirt = []
+	for i in range(0,len(m)):
+		if (m[i] % 10 == 4) or (m[i] % 10 == 9):
+			mCirt.append(m[i])
+			dCirt.append(d[i])
+	axs[plotIndex,0].scatter(mCirt,dCirt,s=45,marker='o',color='darkorange',label = 'reporting day')
+		
 	axs[plotIndex,0].legend()
 	
+	# Plot of UTC(k)- bUTC_GNSS
 	plotIndex += 1
 
+	m,d,u = ReadUTCkbUTC(db,g,startMJD,stopMJD)
+	
+	axs[plotIndex,0].fill_between(m,d-u,d+u,color='violet',alpha=0.6)
+	axs[plotIndex,0].plot(m,d,color='purple')
+	axs[plotIndex,0].scatter(m,d,s=9,marker='o',color='purple')
+	
+	axs[plotIndex,0].set_ylabel('ns')
+	axs[plotIndex,0].set_xlabel('MJD')
+	axs[plotIndex,0].set_title(f'UTC({lab}) - bUTC_{g}')
+	axs[plotIndex,0].grid()
+	
 	plotFile = os.path.join(checkingPath,f'{g}_{yyyyStop}{mmStop:02d}.png')
 	plt.savefig(plotFile,format='png',) # do this before show()
 	plots[g]=plotFile
@@ -322,7 +369,10 @@ for gi in range(0,len(gnss)):
 	html += '</tr>'
 	for m in range(firstUnreleased,lastUnreleased+1):
 		
-		html += f'<tr align="right"><td align="center">{m:5d}</td>' # note that inline CSS is not supported
+		if (m % 10 == 4) or (m % 10 == 9):
+			html += f'<tr align="right" bgcolor="lightblue"><td align="center">{m:5d}</td>'
+		else:
+			html += f'<tr align="right"><td align="center">{m:5d}</td>' # note that inline CSS is not supported
 		
 		r = curs.execute(f'SELECT UTCk_{g},UTCk_{g}_u,UTC_{g},UTC_{g}_u,release_utc from butcgnss where MJD={m};')
 		x = r.fetchone()
