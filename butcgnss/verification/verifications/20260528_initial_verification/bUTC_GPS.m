@@ -21,12 +21,13 @@ GNSSCode = GNSS_CODES(iGNSS);
 GNSSName = GNSS_NAMES(iGNSS);
 
 rootDir = "~/src/UTCk-tools/butcgnss/verification/data";
+refRx  = "PT13"; % reference receiver
 leapSecs = 18;
 GPSEpoch = 44244;
 halfWin = 12.0;
 
-%% Read CGGTTS data, filter and eyeball it
-cg = CGGTTS(startMJD-1,stopMJD+1,rootDir+"/cggtts/",GNSSCode + "ZPT13",'NamingConvention','BIPM','RemoveBadTracks','yes');
+%% Read CGGTTS data from reference data lab, filter and eyeball it
+cg = CGGTTS(startMJD-1,stopMJD+1,rootDir+"/cggtts/",GNSSCode + "Z" + refRx,'NamingConvention','BIPM','RemoveBadTracks','yes');
 totalTracks = length(cg.Tracks);
 fprintf('Total tracks = %d\n',totalTracks);
 
@@ -47,11 +48,11 @@ highSRSYS = totalTracks - highDSG - shortTracks - length(cg.Tracks);
 fprintf('Filter SRSYS: removed  %d\n',highSRSYS);
 
 % and plot REFSYS
-figure(1);
-plot(cg.Tracks(:,cg.MJD)+cg.Tracks(:,cg.STTIME)/86400 -startMJD,cg.Tracks(:,cg.REFSYS)*0.1,'.');
-xlabel("MJD - " + num2str(startMJD));
-ylabel('REFSYS (ns)');
-title('Filtered REFSYS');
+% figure(1);
+% plot(cg.Tracks(:,cg.MJD)+cg.Tracks(:,cg.STTIME)/86400 -startMJD,cg.Tracks(:,cg.REFSYS)*0.1,'.');
+% xlabel("MJD - " + num2str(startMJD));
+% ylabel('REFSYS (ns)');
+% title("Check on filtered REFSYS: " + GNSS_NAMES(iGNSS));
 
 % Comment: looks nominal
 
@@ -80,16 +81,19 @@ for mjd=startMJD:stopMJD
     i = i +1;
 end
 
+% Note: checked some spot values of mean REFSYS against the output of
+% butcupdate.py AOK
+
 % and plot it
-figure(2);
+figure(1);
 plot(cg.Tracks(:,cg.MJD)+cg.Tracks(:,cg.STTIME)/86400 -startMJD,cg.Tracks(:,cg.REFSYS)*0.1,'.');
 hold on;
-plot(avrefsys(:,1)-startMJD,avrefsys(:,2),'yo-')
+plot(avrefsys(:,1)-startMJD,avrefsys(:,2),'go-')
 hold off;
 xlabel(['MJD - ',num2str(startMJD)]);
 ylabel('REFSYS (ns)');
-title('Check on averaged REFSYS');
-legend('raw REFSYS','averaged REFSYS');
+title("Check on averaged REFSYS:" + GNSS_NAMES(iGNSS));
+legend('filtered REFSYS','averaged REFSYS','location','southeast','box','off');
 
 % Comment: looks nominal. 
 
@@ -108,23 +112,24 @@ mjd = mjd';
 interp_utck = interp1(utcutck(:,1),utcutck(:,2),mjd,'linear');
 interp_utck = interp_utck';
 
-figure(3);
+figure(2);
 plot(cg.Tracks(:,cg.MJD)+cg.Tracks(:,cg.STTIME)/86400 -startMJD,cg.Tracks(:,cg.REFSYS)*0.1,'.');
 hold on;
-plot(avrefsys(:,1)-startMJD,avrefsys(:,2),'yo-');
+plot(avrefsys(:,1)-startMJD,avrefsys(:,2),'go-');
 plot(utcutck(:,1)-startMJD,utcutck(:,2),'+-','LineWidth',2);
-plot(mjd-startMJD,interp_utck,'o');
+plot(mjd-startMJD,interp_utck,'ko');
 hold off;
 xlabel("MJD - " + num2str(startMJD));
 ylabel('ns');
 xlim([0 35]);
-title('Check on UTC-UTC(PTB)');
-legend('raw REFSYS','averaged REFSYS','UTC-UTC(PTB)','Interpolated UTC-UTC(PTB)');
+title('Check on UTC - UTC(PTB)');
+legend('filtered REFSYS','averaged REFSYS','UTC - UTC(PTB)','Interpolated UTC - UTC(PTB)','location','southeast','box','off');
 
 %% Load Time System Corrections
 tsc = load(GNSSName + ".TimeSysCorr.txt");
 % Compute 
-i=1; % won't be too fancy - we know how to index into tsc to get data for a given MJD
+i=1; % Won't be too fancy - we know how to index into tsc to get data for a given MJD
+     % In particular, the first entry in the file is for startMJD - 1
 dUTCGPS=zeros(stopMJD - startMJD + 1,2);
 for mjd=startMJD:stopMJD
     % BDS
@@ -140,15 +145,15 @@ for mjd=startMJD:stopMJD
     iTSC = i+1;
     deltaUTC2 = tsc(iTSC,2) + tsc(iTSC,3)*(Dn*86400 + leapSecs - tsc(iTSC,4) + 604800*(Wn - tsc(iTSC,5)));
     deltaUTC = (deltaUTC1+deltaUTC2)/2.0;
-    % fprintf('%g %g %g\n',mjd,deltaUTC,deltaUTC2);
+    % fprintf('%g %g (%g,%g)\n',mjd,deltaUTC,deltaUTC1,deltaUTC2);
     dUTCGPS(i,:) = [mjd,-deltaUTC/1.0E-9]; % since tUTC = tGPS - dUTC
     i=i+1;
 end
 
-figure(4);
+figure(3);
 plot(cg.Tracks(:,cg.MJD)+cg.Tracks(:,cg.STTIME)/86400 -startMJD,cg.Tracks(:,cg.REFSYS)*0.1,'.');
 hold on;
-plot(avrefsys(:,1)-startMJD,avrefsys(:,2),'yo-');
+plot(avrefsys(:,1)-startMJD,avrefsys(:,2),'go-');
 plot(utcutck(:,1)-startMJD,utcutck(:,2),'+-','LineWidth',2);
 plot(dUTCGPS(:,1)-startMJD,dUTCGPS(:,2),'*-','LineWidth',2);
 hold off;
@@ -156,7 +161,7 @@ xlabel("MJD - " + num2str(startMJD));
 ylabel('ns');
 xlim([0 35]);
 title('Check on bUTC');
-legend('raw REFSYS','averaged REFSYS','UTC-UTC(PTB)','bUTC\_GNSS');
+legend('raw REFSYS','averaged REFSYS','UTC - UTC(PTB)','bUTC\_GNSS','location','southeast','box','off');
 
 %% Compute UTC - bUTC_GNSS and UTC(PTB) - bUTC_GNSS
 % UTCk - bUTC = (UTCk - GNSS) - (UTC - GNSS);
@@ -166,14 +171,18 @@ UTC_bUTC  = interp_utck' + UTCk_bUTC; % (UTC - bUTC) = UTC- UTCk + (UTCk - bUTC)
 % Load Circular T estimates
 UTC_bUTC_CirT = load('UTC_bUTC_GPS_cirt.txt');
 
-figure(5);
+figure(4);
 plot(UTCk_bUTC,'.-');
 hold on;
 plot(UTC_bUTC_CirT(:,2),'.-');
 plot(UTC_bUTC,'.-'); 
-plot(interp_utck);
+%plot(interp_utck);
 hold off;
-legend('UTCk\_bUTC','UTC-bUTC (UTCk)','UTC-bUTC (CircularT)','UTC-UTCk (interpolated)');
+xlabel("MJD - " + num2str(startMJD));
+ylabel('ns');
+title('Comparison with Circular T')
+%legend('UTCk-bUTC','UTC-bUTC (UTCk)','UTC-bUTC (CircularT)','UTC-UTCk (interpolated)','location','southeast','box','off');
+legend('UTCk - bUTC','UTC - bUTC (UTCk)','UTC - bUTC (CircularT)','location','southeast','box','off');
 
 % Uncertainties
 i=1;
@@ -199,14 +208,30 @@ for i=1:length(UTCk_bUTC)
     %fprintf('%5d % 10.5g +/- % 7.5g  % 10.5g +/- % 7.5g\n',mjd(i),UTCk_bUTC(i),u_UTCk_bUTC(i),UTC_bUTC(i),u_UTC_bUTC(i));
 end
 
-% Now compare with the output of butcupdate.py
-verData = load(GNSSName + ".PTB.dat");
-% Columns are MJD UTCk-buTC u UTC-bUTC u
+%% Compare with the output of butcupdate.py
+verData = load(GNSSName + ".PTB.dat"); % Columns are MJD UTCk-buTC u UTC-bUTC u
+% Compute fractional differences 
+
 for i=1:length(verData)
-    errUTCk = verData(i,2) - UTCk_bUTC(i);
-    %fprintf('%5d %g\n',mjd(i),UTCk_bUTC(i),u_UTCk_bUTC(i),UTC_bUTC(i),u_UTC_bUTC(i));
-    fprintf('%5d %g\n',verData(i,1),errUTCk);
+    dUTCk_bUTC(i) = (verData(i,2) - UTCk_bUTC(i))/verData(i,2);
+    du_UTCk_bUTC(i) = (verData(i,3) - u_UTCk_bUTC(i))/verData(i,3);
+    dUTC_bUTC(i) = (verData(i,4) - UTC_bUTC(i))/verData(i,4);
+    du_UTC_bUTC(i) = (verData(i,5) - u_UTC_bUTC(i))/verData(i,5);
+    fprintf('%5d %g %g %g %g\n',verData(i,1),dUTCk_bUTC(i),du_UTCk_bUTC(i),dUTC_bUTC(i),du_UTC_bUTC(i));
 end
+
+figure(5);
+plot(dUTCk_bUTC,'.');
+hold on;
+plot(du_UTCk_bUTC,'o');
+plot(dUTC_bUTC,'+');
+plot(du_UTC_bUTC,'*');
+hold off;
+
+xlabel("MJD - " + num2str(startMJD));
+ylabel('butcupdate.py fractional difference');
+title('Comparison with Circular T');
+legend('UTCk - bUTC','u(UTCk-bUTC)','UTC-bUTC','u(UTC-bUTC)','location','southeast','box','off');
 
 function [uA, uB, tau] = FindNearestCirtU(utcutck,mjd)
   uA = 0;
