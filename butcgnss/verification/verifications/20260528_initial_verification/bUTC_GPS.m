@@ -2,7 +2,7 @@
 % Note that the MATLAB library CGGTTS is available from
 % https://github.com/groundstate/time-transfer-tools
 % Version 0.1.0
-%
+% Note: needs symlog 
 
 %% Setup
 BDS=1;
@@ -119,6 +119,7 @@ plot(avrefsys(:,1)-startMJD,avrefsys(:,2),'go-');
 plot(utcutck(:,1)-startMJD,utcutck(:,2),'+-','LineWidth',2);
 plot(mjd-startMJD,interp_utck,'ko');
 hold off;
+
 xlabel("MJD - " + num2str(startMJD));
 ylabel('ns');
 xlim([0 35]);
@@ -169,7 +170,7 @@ UTCk_bUTC = avrefsys(:,2) - dUTCGPS(:,2);
 UTC_bUTC  = interp_utck' + UTCk_bUTC; % (UTC - bUTC) = UTC- UTCk + (UTCk - bUTC)
 
 % Load Circular T estimates
-UTC_bUTC_CirT = load('UTC_bUTC_GPS_cirt.txt');
+UTC_bUTC_CirT = load('UTC_bUTC_' + GNSS_NAMES(iGNSS) + '_cirt.txt');
 
 figure(4);
 plot(UTCk_bUTC,'.-');
@@ -182,7 +183,7 @@ xlabel("MJD - " + num2str(startMJD));
 ylabel('ns');
 title('Comparison with Circular T')
 %legend('UTCk-bUTC','UTC-bUTC (UTCk)','UTC-bUTC (CircularT)','UTC-UTCk (interpolated)','location','southeast','box','off');
-legend('UTCk - bUTC','UTC - bUTC (UTCk)','UTC - bUTC (CircularT)','location','southeast','box','off');
+legend('UTCk - bUTC','UTC - bUTC (CircularT)','UTC - bUTC (UTCk)','location','southeast','box','off');
 
 % Uncertainties
 i=1;
@@ -221,17 +222,32 @@ for i=1:length(verData)
 end
 
 figure(5);
-plot(dUTCk_bUTC,'.');
+plot(dUTCk_bUTC,'.'); 
 hold on;
 plot(du_UTCk_bUTC,'o');
 plot(dUTC_bUTC,'+');
 plot(du_UTC_bUTC,'*');
 hold off;
+symlog(gca,'y',-17);% pseudolog plot
 
 xlabel("MJD - " + num2str(startMJD));
-ylabel('butcupdate.py fractional difference');
-title('Comparison with Circular T');
+ylabel('fractional difference');
+title('Comparison of this script with butcupdate.py');
 legend('UTCk - bUTC','u(UTCk-bUTC)','UTC-bUTC','u(UTC-bUTC)','location','southeast','box','off');
+
+% A bit redundant, but just for completeness, compare butcupdate.py with
+% Circular T
+
+for i=1:length(verData)
+    dUTC_cirt(i) = (verData(i,4) - UTC_bUTC_CirT(i,2));
+    fprintf('%5d %g\n',verData(i,1),dUTC_cirt(i));
+end
+
+figure(6);
+plot(dUTC_cirt,'+-');
+xlabel("MJD - " + num2str(startMJD));
+ylabel('ns');
+title('Difference between butcupdate.py and Circular T');
 
 function [uA, uB, tau] = FindNearestCirtU(utcutck,mjd)
   uA = 0;
