@@ -62,7 +62,7 @@ try:
 except ImportError:
 	sys.exit('ERROR: Must install rinexlib\n eg openttp/software/system/installsys.py -i rinexlib')
 	
-VERSION = '0.18.0'
+VERSION = '0.18.1'
 AUTHORS = 'Michael Wouters'
 
 SQRT2 = math.sqrt(2)
@@ -257,9 +257,10 @@ def EstimateRefSys(cgBef,cgAft,winSize):
 	# now chop off 5% of data at each end and re-estimate mean, median and sd
 	nTrks = len(trks)
 	nChop = round(0.05*nTrks)
-	filterAvg = np.mean(trks[nChop:ntrks-nChop])
-	filterStd = np.std(trks[nChop:ntrks-nChop],ddof=1)
-	filterMed = np.median(trks[nChop:ntrks-nChop])
+	
+	filterAvg = np.mean(trks[nChop:nTrks-nChop])
+	filterStd = np.std(trks[nChop:nTrks-nChop],ddof=1)
+	filterMed = np.median(trks[nChop:nTrks-nChop])
 	ottp.Debug('Filter estimates: mean = {}, median = {}, sd = {}'.format(filterAvg,filterMed,filterStd))
 	
 	# Remove anything more than 6*SD from the median
