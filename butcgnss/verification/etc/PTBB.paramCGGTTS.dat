@@ -45,13 +45,13 @@ INT DELAY E5b GAL (in ns)
 INT DELAY E5 GAL (in ns)
 0.0
 INT DELAY B1I BDS (in ns)
-33.0
+0.0
 INT DELAY B2I BDS (in ns)
-32.5
+0.0
 INT DELAY B1C BDS (in ns)
-0.0
+33.0
 INT DELAY B2a BDS (in ns)
-0.0
+32.5
 ANT CAB DELAY (in ns) 
 205.7
 CLOCK CAB DELAY XP+XO (in ns)   
