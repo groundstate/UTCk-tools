@@ -16,6 +16,7 @@ U_NAVMSG  = [0.2,0.1,0.1,1.3];  % from Defraigne, one sigma
 
 startMJD = 61041;
 stopMJD  = 61071; 
+
 iGNSS = GPS;
 GNSSCode = GNSS_CODES(iGNSS);
 GNSSName = GNSS_NAMES(iGNSS);
@@ -70,14 +71,14 @@ for mjd=startMJD:stopMJD
     % Remove outliers
     rs = xrefsys(:,2);
     rs = sort(rs);
-    nChop = ceil(0.05*length(rs));
+    nChop = round(0.05*length(rs),"TieBreaker", "even"); % to match python
     filterMedian = median(rs(nChop+1:end-nChop));
     filterStd = std(rs(nChop+1:end-nChop));
     bad = abs(rs - filterMedian) >= 6*filterStd;
     rs(bad,:)=[];
     avrefsys(i,:)  = [mjd,mean(rs)];
     stdrefsys(i,:) = [mjd,std(rs)];
-    % fprintf('%d %g %g->%g %g %g %g %g\n',mjd,sum(bad),nBef,length(rs),filterMedian, filterStd,avrefsys(i,2),stdrefsys(i,2));
+    %fprintf('%d %g %g->%g %g %g %g %g\n',mjd,sum(bad),nBef,length(rs),filterMedian, filterStd,avrefsys(i,2),stdrefsys(i,2));
     i = i +1;
 end
 
@@ -133,8 +134,6 @@ i=1; % Won't be too fancy - we know how to index into tsc to get data for a give
      % In particular, the first entry in the file is for startMJD - 1
 dUTCGPS=zeros(stopMJD - startMJD + 1,2);
 for mjd=startMJD:stopMJD
-    % BDS
-    % GAL
     % GPS
     % Don't have to worry about leap second logic any more ...
     N = mjd - GPSEpoch;
@@ -206,19 +205,20 @@ end
 
 mjd = startMJD:stopMJD;
 for i=1:length(UTCk_bUTC)
-    %fprintf('%5d % 10.5g +/- % 7.5g  % 10.5g +/- % 7.5g\n',mjd(i),UTCk_bUTC(i),u_UTCk_bUTC(i),UTC_bUTC(i),u_UTC_bUTC(i));
+    % fprintf('%5d %10.5g   +/- % 7.5g  % 10.5g  +/- % 7.5g\n',mjd(i),UTCk_bUTC(i),u_UTCk_bUTC(i),UTC_bUTC(i),u_UTC_bUTC(i));
 end
 
 %% Compare with the output of butcupdate.py
 verData = load(GNSSName + ".PTB.dat"); % Columns are MJD UTCk-buTC u UTC-bUTC u
 % Compute fractional differences 
-
+fprintf('\n\nFractional differences: butcupdate.py vs this script \n');
+fprintf('        UTCk - bUTC      u         UTC-bUTC         u\n\n')
 for i=1:length(verData)
     dUTCk_bUTC(i) = (verData(i,2) - UTCk_bUTC(i))/verData(i,2);
     du_UTCk_bUTC(i) = (verData(i,3) - u_UTCk_bUTC(i))/verData(i,3);
     dUTC_bUTC(i) = (verData(i,4) - UTC_bUTC(i))/verData(i,4);
     du_UTC_bUTC(i) = (verData(i,5) - u_UTC_bUTC(i))/verData(i,5);
-    fprintf('%5d %g %g %g %g\n',verData(i,1),dUTCk_bUTC(i),du_UTCk_bUTC(i),dUTC_bUTC(i),du_UTC_bUTC(i));
+    fprintf('%5d %12.3e %12.3e %12.3e %12.3e\n',verData(i,1),dUTCk_bUTC(i),du_UTCk_bUTC(i),dUTC_bUTC(i),du_UTC_bUTC(i));
 end
 
 figure(5);
@@ -238,10 +238,14 @@ legend('UTCk - bUTC','u(UTCk-bUTC)','UTC-bUTC','u(UTC-bUTC)','location','southea
 % A bit redundant, but just for completeness, compare butcupdate.py with
 % Circular T
 
+fprintf('\n\nUTC - bUTC: difference between butcupdate.py and CirT (ns)\n\n');
 for i=1:length(verData)
     dUTC_cirt(i) = (verData(i,4) - UTC_bUTC_CirT(i,2));
-    fprintf('%5d %g\n',verData(i,1),dUTC_cirt(i));
+    fprintf('%5d %6.3f\n',verData(i,1),dUTC_cirt(i));
 end
+% and some stats
+fprintf('\nmean difference = %g\n',mean(dUTC_cirt));
+fprintf('std dev = %g\n',std(dUTC_cirt));
 
 figure(6);
 plot(dUTC_cirt,'+-');

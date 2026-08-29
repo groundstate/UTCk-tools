@@ -11,7 +11,8 @@ https://webtai.bipm.org/api/v1.0/get-data.html?scale=b_gps&mjd1=61041&mjd2=61071
 
 Step 2
 Update the database:
-butcupdate.py -d -c butc.conf  --cirt report 61041 61071
+First, remove the existing one (in this directory), then run
+./butcupdate.py_vx_x_x -d -c butc.conf  --cirt report 61041 61071
 
 
 Step 3
