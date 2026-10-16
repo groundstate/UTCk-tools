@@ -1,20 +1,24 @@
 # Description
 
 This is a set of scripts that can be used to generate reports on the differences UTC(k)-bUTC_GNSS and UTC-bUTC_GNSS.
-In particular, they are intended to provide a data flow suitable to the requirements of the quality system that an NMI
-will typically be operating under. The documentation here assumes that you are installing on Linux.
+They are intended to provide a data flow suitable for the requirements of the quality system that an NMI
+will typically operate under. 
 
-The scripts define the following data flow:
+There are four core python scripts that define the data flow:
 - butcupdate.py  Updates the database of UTC(k)-bUTC_GNSS and UTC-bUTC_GNSS differences (automatic)
 - butcreport.py  Updates the monthly reports from the database (automatic)
-- butccheck.py   Produce a report on computed differences for examination (automatic)
-- butcrelease.py Release data for final publication (manual)
+- butccheck.py   Produces a report on computed differences for examination (automatic)
+- butcrelease.py Releases data for final publication (manual)
+
+The three scripts described as automatic are intended to be run as  cron jobs.
+
+This documentation assumes that you are installing on Linux. We currently use Ubuntu.
 
 # Installation
 
 Most of the python modules you need will likely already be installed.
 
-You will probably need to install cggttslib, ottplib and rinexlib though.
+You will probably need to install cggttslib, ottplib and rinexlib.
 These are available through OpenTTP:
 https://github.com/openttp/openttp
 
@@ -25,44 +29,96 @@ Check out 'develop', cd to software/system/ and then, with superuser privileges,
 
 # Configuration file
 
-A single configuration file controls the operation of all four scripts.
-The sample configuration file documents the available configuration options.
+A single configuration file, butc.conf, is used by the four core scripts.
+The sample configuration file sample.butc.conf documents the available configuration options.
+The default name for the configuration file is butcgnss.conf.
+The default location for the configuration file is ~/etc. 
+Otherwise the configuration file can be specified is an option to each script.
 
 One important option is the choice between using Circular T reports or the BIPM Web API 
-to get UTC - UTC(k) differences and their uncertainty.
+to get UTC - UTC(k) differences and their uncertainty (currently implemented as a command line option).
 The Web API currently reports the total uncertainty rather than the components uA and uB.
 Usually, uA << uB so the total uncertainty is just uB but this is not always true.
 
 For this reason, the option to use the published Circular T is available.
-butcupdate.py does not attempt to download Circular T though.
-It is assumed that Circlar T is available as a local file.
-
+butcupdate.py does not download Circular T though.not 
+It is assumed that Circular T is available as a local file.
+A simple mirroring process using eg lftp, can be used to maintain an up-to-date local archive of
+Circular T.
 
 # Setting up cron
-
-The first three scripts listed above are intended to be run automatically.
 
 Since the differences UTC(k) - bUTC_GNSS can be computed each day, butcupdate.py can be run daily.
 The caveat on this is that uB is needed for the calculation of uncertainties and this is not strictly 
 available until the publication of Circular T.
 
-The current software uses the last value of uB published in Circular T, when the current value is not obtainable. 
-In practice, the incremental change in the published uncertainty due to ageing of the calibration will at
-most affect the published uncertainty by +/- 1 ns.
+As a workaround, the software uses the last value of uB published in Circular T, when the current value is unavailable. 
+In practice, the incremental change in the published uncertainty due to ageing of the calibration will only
+affect the published uncertainty by +/- 1 ns (due to rounding of reported results) unless there is a step change in 
+the calibration status.
  
-butcreport.py can be run each day. It recalculates all values in the database within a window of XX days, 
-from the current day.
+butcreport.py can be run each day.
 
-butcrcheck.py should run after Circular T is published.
+butccheck.py can also be run each day. 
 
-butcrelease.py is run manually.
-It indicates the MJDs for which data updated from Circular T is now available.
-Values of UTC-bUTC_GNSS are not reported in he published report until they are released.
-
+butcrelease.py is run manually as an  interactive script.
+It indicates the MJDs for which data updated from Circular T are now available and
+asks whether these values can be published.
+Values of UTC-bUTC_GNSS are not published until they are released.
 
 You may need to define USER in your crontab
 eg in the crontab
 USER=butcgnss
+
+# Workflows
+
+butcupdate.py and butcreport.py are usually set up to run automatically.
+Uploading of the report generated by butcreport.py is not done by butcreport.py though.
+This must be handled separately by eg a mirroring process to a web server.
+This allows the user to choose when to make data available. 
+This can then be deferred until Circular T is published, and the data checked, for example.
+If it is desired to make new values of UTC(k) - bUTC_GNSS
+available each day, then this can also be done, with appropriate caveats.
+
+butccheck.py compares BIPM's published estimates of bUTC_GNSS with the local estimate.
+The difference is plotted and then (optionally) emailed. 
+The email is intended as a prompt to run butcrelease.py, to publish the final values.
+
+# Debugging problems 
+
+All of the scripts can be run with a debugging option ('-d') to produce verbose output. 
+Temporary files will usually be retained when running in debugging mode. 
+It will usually be necessary to read the relevant code to make sense of 
+debugging output. Note that butcupdate.py has an option to run without updating the database.
+
+# butcupdate.py
+
+This is where all calculations, including the uncertainties, are made. 
+The script recalculates all values in the database within a window of 60 days, 
+reckoned from the current day.
+The calculated data are stored in a SQLLite database, which is updated as new data, eg Circular T, become available.
+When new Circular T data are available, values of UTC - bUTC_GNSS are computed and stored in the database, but not published in
+the monthly report.
+The other scripts report on the data stored in the database.
+
+The required inputs are CGGTTS time-transfer files and RINEX navigation files. 
+For RINEX V3, only daily, mixed navigation files are supported. 
+These RINEX files must contain the TIME SYSTEM CORR parameters for the GNSS being processed.
+RINEX V4 is not supported.
+
+# butccheck.py
+
+This generates a report on recent bUTC_GNSS estimates. The availability of
+new, unreleased values of UTC - b, as tagged in the database, will generate a report which can be emailed.
+
+# butcrelease .py
+
+This reads the database, and identifies dates for which values of UTC - bUTC_GNSS are now available for publication.
+
+# butcutil.py
+
+This provides a simple way of extracting information from the database.
+
 
 
 
