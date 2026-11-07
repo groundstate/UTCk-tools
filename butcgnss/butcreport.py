@@ -220,8 +220,6 @@ if args.month: # manually specified a single month
 
 ottp.Debug(f'Range: 1-{mmStart}-{yyyyStart},{lastDayOfMonth}-{mmStop}-{yyyyStop}')
 
-sys.exit(0)
-
 startMJD = ottp.MJD(datetime(yyyyStart,mmStart,1,0,0,0,tzinfo=timezone.utc).timestamp())
 stopMJD =  ottp.MJD(datetime(yyyyStop,mmStop,lastDayOfMonth,0,0,0,tzinfo=timezone.utc).timestamp())
 
