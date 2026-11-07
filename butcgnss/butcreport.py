@@ -43,7 +43,7 @@ try:
 except ImportError:
 	sys.exit('ERROR: Must install ottplib\n eg openttp/software/system/installsys.py -i ottplib')
 
-VERSION = '0.1.1'
+VERSION = '0.2.1'
 AUTHORS = 'Michael Wouters'
 
 MIN_UTCK_U = 5
@@ -80,7 +80,7 @@ def WriteHeader(fout,header,mm,yyyy):
 		g=gnss[gi]
 		hdr1 += '-'*12 + g + '-'*12
 		
-		hdr3 += '{:>9}{:>5}{:>9}{:>5}'.format('UTC('+lab+')','u','UTC','u')
+		hdr3 += '{:>9}{:>5}{:>9}{:>5}'.format('UTC('+lab+')','U','UTC','U')
 		hdr4 += '{:>9}{:>14}'.format('- bUTC','- bUTC')
 		if gi < len(gnss):
 			hdr1 += ' '*2
@@ -128,6 +128,7 @@ parser.add_argument('--debug','-d',help='debug (to stderr)',action='store_true')
 parser.add_argument('--version','-v',help='show version and exit',action='store_true')
 parser.add_argument('--month','-m',help='create a report for the given month 1..12 (current year assumed)')
 parser.add_argument('--year','-y',help='create a report for the given year (need to specify month too!)')
+parser.add_argument('--finalized-only',help='report only finalized data ie UTC-bUTC_GNSS differences have been released',action='store_true')
 
 args = parser.parse_args()
 
@@ -142,6 +143,8 @@ if (args.config):
 
 debug = args.debug
 ottp.SetDebugging(debug)
+
+finalized = args.finalized_only
 
 cfg=ottp.Initialise(configFile,['main:gnss'])
 
@@ -171,16 +174,37 @@ mm   = dt.month
 yyyy = dt.year
 dd   = dt.day
 
-mmStart = mm - 2 # need to check the previous two months
+# Test the following for the first day of a new year
+# mm = 1, yyyy = 2026, dd = 1
+# First day of the month
+# mm = 2, yyyy = 2026, dd = 1
+# mm = 3, yyyy = 2026, dd = 1
+
+# The previous two months are checked, plus the current month to the previous day
+mmStart = mm - 2 
 yyyyStart = yyyy
+
+# Check whether the first month processed is in the previous year
 if mmStart <= 0:
 	mmStart += 12
-	yyStart = yyyy - 1
-	
-mmStop = mm
-yyyyStop = yyyy
-lastDayOfMonth = dd -1 # for the current month, yesterday
+	yyyyStart = yyyy - 1 # adjust the year
 
+# Now we need to check the last day of the month that will be processed
+
+if dd > 1: # already past the first day of the month, so not crossing any date boundary
+	mmStop = mm
+	yyyyStop = yyyy
+	lastDayOfMonth = dd - 1 # for the current month, yesterday
+else: # first day of month, so ...
+	mmStop = mm - 1 # month is previous month
+	yyyyStop = yyyy 
+	
+	if mmStop <= 0: # month is in previous year
+		mmStop = 12 # and it is December
+		yyyyStop == yyyy -1 
+	
+	lastDayOfMonth = calendar.monthrange(yyyyStop,mmStop)[1]
+	
 if args.year:
 	if not args.month:
 		ottp.ErrorExit('You need to specify the month as well (--month 1..12)')
@@ -194,7 +218,9 @@ if args.month: # manually specified a single month
 	mmStop = mm
 	yyyyStop = yyyy
 
-ottp.Debug(f'{mmStart} {yyyyStart},{mmStop} {yyyyStop}')
+ottp.Debug(f'Range: 1-{mmStart}-{yyyyStart},{lastDayOfMonth}-{mmStop}-{yyyyStop}')
+
+sys.exit(0)
 
 startMJD = ottp.MJD(datetime(yyyyStart,mmStart,1,0,0,0,tzinfo=timezone.utc).timestamp())
 stopMJD =  ottp.MJD(datetime(yyyyStop,mmStop,lastDayOfMonth,0,0,0,tzinfo=timezone.utc).timestamp())
