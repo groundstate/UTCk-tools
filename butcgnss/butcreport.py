@@ -43,7 +43,7 @@ try:
 except ImportError:
 	sys.exit('ERROR: Must install ottplib\n eg openttp/software/system/installsys.py -i ottplib')
 
-VERSION = '0.2.1'
+VERSION = '0.2.2'
 AUTHORS = 'Michael Wouters'
 
 MIN_UTCK_U = 5
@@ -58,6 +58,9 @@ def ShowVersion():
 # ---------------------------------------------
 def WriteHeader(fout,header,mm,yyyy):
 	
+	dt = datetime(yyyy,mm,1)
+	fout.write('Report for {}\n'.format(dt.strftime('%B %Y')))
+	
 	if (os.path.isfile(header)):
 		with open(header, 'r') as fin:
 			txt = fin.read()
@@ -65,9 +68,6 @@ def WriteHeader(fout,header,mm,yyyy):
 			fout.write(txt)
 	else:
 		ottp.Debug(f'Unable to open {header}')
-	
-	dt = datetime(yyyy,mm,1)
-	fout.write('Report for {}\n'.format(dt.strftime('%B %Y')))
 	
 	# Date column is 10x
 	# MJD  column is 5x
